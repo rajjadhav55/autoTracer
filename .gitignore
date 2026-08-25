@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*~
+.venv/
+venv/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Django
+media/
+static_collected/
