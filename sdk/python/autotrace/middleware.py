@@ -18,7 +18,7 @@ Quick start
 
         AUTOTRACE_DSN = "https://api.autotrace.io/ingest/"  # default
         AUTOTRACE_API_KEY = "<your-project-api-key>"
-
+ 
 3.  That's it — unhandled 500s are now reported automatically.
 """
 
