@@ -1,73 +1,67 @@
-import {
-  AlertTriangle,
-  Activity,
-  CheckCircle2,
-  XCircle,
-  BarChart3,
-} from 'lucide-react';
+import { Activity, Clock, CheckCircle2, AlertOctagon, Terminal } from 'lucide-react';
 
-const CARDS = [
+const STATS = [
   {
     key: 'total',
-    label: 'Total Incidents',
-    icon: BarChart3,
-    gradient: 'from-accent-600/20 to-accent-500/5',
-    iconColor: 'text-accent-400',
-    border: 'border-accent-500/20',
+    label: 'TOTAL CAPTURED',
+    icon: Terminal,
+    textColor: 'text-zinc-100',
   },
   {
     key: 'pending',
-    label: 'Pending Triage',
-    icon: AlertTriangle,
-    gradient: 'from-warning-500/20 to-warning-500/5',
-    iconColor: 'text-warning-400',
-    border: 'border-warning-500/20',
+    label: 'PENDING TRIAGE',
+    icon: Clock,
+    textColor: 'text-amber-400',
+  },
+  {
+    key: 'analyzing',
+    label: 'AI ANALYZING',
+    icon: Activity,
+    textColor: 'text-sky-400',
   },
   {
     key: 'triaged',
-    label: 'Triaged',
+    label: 'AI TRIAGED',
     icon: CheckCircle2,
-    gradient: 'from-success-500/20 to-success-500/5',
-    iconColor: 'text-success-400',
-    border: 'border-success-500/20',
+    textColor: 'text-emerald-400',
   },
   {
     key: 'failed',
-    label: 'Failed',
-    icon: XCircle,
-    gradient: 'from-danger-500/20 to-danger-500/5',
-    iconColor: 'text-danger-400',
-    border: 'border-danger-500/20',
+    label: 'TRIAGE FAILED',
+    icon: AlertOctagon,
+    textColor: 'text-rose-400',
   },
 ];
 
 export default function MetricsHeader({ counts }) {
   return (
-    <div className="stagger-children grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {CARDS.map((card) => {
-        const Icon = card.icon;
-        const value = counts?.[card.key] ?? 0;
+    <div className="grid grid-cols-2 divide-y divide-zinc-800 border border-zinc-800 bg-zinc-900/70 sm:grid-cols-5 sm:divide-x sm:divide-y-0">
+      {STATS.map((stat) => {
+        const Icon = stat.icon;
+        const count = counts?.[stat.key] ?? 0;
 
         return (
           <div
-            key={card.key}
-            className={`relative overflow-hidden rounded-xl border ${card.border} bg-gradient-to-br ${card.gradient} p-5 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:shadow-surface-900/50`}
+            key={stat.key}
+            className="flex flex-col justify-between px-4 py-3 sm:px-5"
           >
-            {/* Glow effect */}
-            <div className="pointer-events-none absolute -top-12 -right-12 h-32 w-32 rounded-full bg-white/[0.03] blur-2xl" />
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-text-secondary">
-                  {card.label}
-                </p>
-                <p className="mt-1 text-3xl font-bold tracking-tight text-text-primary">
-                  {value}
-                </p>
-              </div>
-              <div className={`rounded-lg bg-surface-800/50 p-2.5 ${card.iconColor}`}>
-                <Icon size={22} />
-              </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-[11px] font-medium tracking-wider text-zinc-400 uppercase">
+                {stat.label}
+              </span>
+              <Icon
+                size={13}
+                aria-hidden="true"
+                className="text-zinc-400 shrink-0"
+              />
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span
+                className={`font-mono text-2xl font-semibold tracking-tight tabular-nums ${stat.textColor}`}
+              >
+                {count}
+              </span>
+              <span className="text-[11px] font-mono text-zinc-400">events</span>
             </div>
           </div>
         );

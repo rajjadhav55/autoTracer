@@ -1,40 +1,43 @@
-const STATUS_CONFIG = {
+const STATUS_MAP = {
   PENDING: {
-    label: 'Pending',
-    classes: 'bg-warning-500/15 text-warning-400 ring-warning-500/30',
-    dot: 'bg-warning-400',
+    label: 'PENDING',
+    dotClass: 'bg-amber-400',
+    badgeClass: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
   },
   ANALYZING: {
-    label: 'Analyzing',
-    classes: 'bg-info-500/15 text-info-400 ring-info-500/30',
-    dot: 'bg-info-400 animate-pulse-dot',
+    label: 'ANALYZING',
+    dotClass: 'bg-sky-400 animate-pulse-pip',
+    badgeClass: 'border-sky-500/25 bg-sky-500/10 text-sky-300',
   },
   TRIAGED: {
-    label: 'Triaged',
-    classes: 'bg-success-500/15 text-success-400 ring-success-500/30',
-    dot: 'bg-success-400',
+    label: 'TRIAGED',
+    dotClass: 'bg-emerald-400',
+    badgeClass: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
   },
   FAILED: {
-    label: 'Failed',
-    classes: 'bg-danger-500/15 text-danger-400 ring-danger-500/30',
-    dot: 'bg-danger-400',
+    label: 'FAILED',
+    dotClass: 'bg-rose-400',
+    badgeClass: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
   },
   RESOLVED: {
-    label: 'Resolved',
-    classes: 'bg-accent-500/15 text-accent-400 ring-accent-500/30',
-    dot: 'bg-accent-400',
+    label: 'RESOLVED',
+    dotClass: 'bg-zinc-400',
+    badgeClass: 'border-zinc-700 bg-zinc-800 text-zinc-300',
   },
 };
 
 export default function StatusBadge({ status }) {
-  const config = STATUS_CONFIG[status] || STATUS_CONFIG.PENDING;
+  const meta = STATUS_MAP[status] || STATUS_MAP.PENDING;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${config.classes}`}
+      className={`inline-flex items-center gap-1.5 rounded-[4px] border px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide uppercase ${meta.badgeClass}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
-      {config.label}
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`}
+      />
+      <span>{meta.label}</span>
     </span>
   );
 }

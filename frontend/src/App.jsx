@@ -1,16 +1,12 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Activity,
   RefreshCw,
   Search,
   Zap,
-  Filter,
-  Radio,
-  ServerCrash,
-  Sparkles,
-  ExternalLink,
-  ShieldCheck,
   CheckCircle2,
+  AlertCircle,
+  Terminal,
+  Cpu,
 } from 'lucide-react';
 import MetricsHeader from './components/MetricsHeader';
 import IncidentTable from './components/IncidentTable';
@@ -35,14 +31,13 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [chaosLoading, setChaosLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const searchInputRef = useRef(null);
 
-  // Show a temporary toast banner
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Fetch incidents & counts from backend
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setIsRefreshing(true);
     try {
@@ -51,218 +46,258 @@ export default function App() {
       setIncidents(data.results || []);
       setError(null);
     } catch (err) {
-      console.error('Error fetching incidents:', err);
-      setError(err.message || 'Failed to connect to AutoTrace API');
+      console.error('Failed to load incident stream:', err);
+      setError(err.message || 'API unreachable on port 8000');
     } finally {
       setLoading(false);
       setIsRefreshing(false);
     }
   }, []);
 
-  // Initial load
   useEffect(() => {
     loadData(false);
   }, [loadData]);
 
-  // Real-time polling every 4 seconds when autoRefresh is active
+  // Polling stream every 4s
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(() => {
+    const timer = setInterval(() => {
       loadData(true);
     }, 4000);
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
   }, [autoRefresh, loadData]);
 
-  // Simulate a test crash to verify ingestion & Gemini AI triage
+  // Global keyboard shortcuts (slash to focus search, R to reload)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (
+        e.key === '/' &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleSimulateChaos = async (scenario = 'zero_division') => {
     setChaosLoading(true);
     try {
       await triggerChaosScenario(scenario);
-      showToast('⚡ Chaos test error triggered! Incident captured.');
-      // Refresh immediately, then again in 2s to allow Celery worker to finish
+      showToast('Chaos incident intercepted by middleware');
       await loadData(false);
       setTimeout(() => loadData(true), 2500);
-    } catch (err) {
-      // If the chaos endpoint raised 500 as expected, the middleware captured it!
-      showToast('⚡ Chaos error triggered & intercepted by AutoTrace.');
-      setTimeout(() => loadData(false), 1500);
+    } catch {
+      showToast('Chaos incident intercepted by middleware');
+      setTimeout(() => loadData(false), 1200);
     } finally {
       setChaosLoading(false);
     }
   };
 
-  // Filtered incidents list
   const filteredIncidents = useMemo(() => {
     return incidents.filter((incident) => {
-      // Status filter
       if (statusFilter !== 'ALL' && incident.status !== statusFilter) {
         return false;
       }
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const errorType = (incident.error_type || '').toLowerCase();
-        const errorMessage = (incident.error_message || '').toLowerCase();
-        const endpoint = (incident.endpoint || '').toLowerCase();
-        return errorType.includes(q) || errorMessage.includes(q) || endpoint.includes(q);
+        const type = (incident.error_type || '').toLowerCase();
+        const msg = (incident.error_message || '').toLowerCase();
+        const path = (incident.endpoint || '').toLowerCase();
+        return type.includes(q) || msg.includes(q) || path.includes(q);
       }
       return true;
     });
   }, [incidents, statusFilter, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-surface-900 text-text-primary antialiased selection:bg-accent-500 selection:text-white">
-      {/* Background ambient lighting */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-[450px] w-[900px] rounded-full bg-accent-600/10 blur-[130px]" />
-        <div className="absolute top-1/3 -left-32 h-[350px] w-[350px] rounded-full bg-info-500/5 blur-[100px]" />
-      </div>
-
-      <div className="relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {/* Navigation / Header Bar */}
-        <header className="mb-8 flex flex-col gap-4 border-b border-border/80 pb-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3.5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-tr from-accent-600 to-indigo-500 shadow-lg shadow-accent-500/25 ring-1 ring-white/20">
-              <Sparkles size={22} className="text-white" />
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-zinc-700 selection:text-white">
+      {/* Top Application Bar */}
+      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-xs">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6">
+          {/* Brand */}
+          <div className="flex items-center gap-3">
+            <div className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900 text-zinc-100 font-mono text-xs font-bold">
+              AT
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-black tracking-tight text-white">AutoTrace</h1>
-                <span className="rounded-md border border-accent-500/30 bg-accent-500/10 px-2 py-0.5 text-[11px] font-mono font-medium text-accent-400">
-                  AI Triage Engine
-                </span>
-              </div>
-              <p className="text-xs text-text-secondary">
-                Autonomous error monitoring, stack diagnosis & fix suggestions
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-semibold tracking-tight text-zinc-100">
+                AutoTrace
+              </span>
+              <span className="text-zinc-400 font-mono text-xs">/</span>
+              <span className="font-mono text-xs text-zinc-400">triage-console</span>
             </div>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Live Polling Status Indicator */}
+          {/* Controls */}
+          <div className="flex items-center gap-2">
+            {/* Live stream status indicator */}
             <button
+              type="button"
               onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+              aria-label={autoRefresh ? 'Pause live stream polling' : 'Resume live stream polling'}
+              className={`flex items-center gap-1.5 rounded border px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 ${
                 autoRefresh
-                  ? 'border-success-500/30 bg-success-500/10 text-success-400'
-                  : 'border-border bg-surface-800 text-text-muted hover:text-text-secondary'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                  : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200'
               }`}
-              title={autoRefresh ? 'Click to pause auto-polling' : 'Click to enable live 4s polling'}
             >
               <span
-                className={`h-2 w-2 rounded-full ${
-                  autoRefresh ? 'bg-success-400 animate-pulse-dot' : 'bg-text-muted'
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${
+                  autoRefresh ? 'bg-emerald-400 animate-pulse-pip' : 'bg-zinc-400'
                 }`}
               />
-              <span>{autoRefresh ? 'Live Monitoring' : 'Polling Paused'}</span>
+              <span className="tabular-nums">
+                {autoRefresh ? 'STREAMING' : 'PAUSED'}
+              </span>
             </button>
 
-            {/* Manual Refresh Button */}
+            {/* Manual refresh */}
             <button
+              type="button"
               onClick={() => loadData(false)}
               disabled={isRefreshing}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-800 px-3 py-1.5 text-xs font-medium text-text-secondary transition-all hover:bg-surface-700 hover:text-white disabled:opacity-50"
+              aria-label="Refresh incident list"
+              className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-mono text-xs text-zinc-300 transition-colors duration-100 hover:bg-zinc-850 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50"
             >
-              <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-accent-400' : ''} />
+              <RefreshCw
+                size={12}
+                aria-hidden="true"
+                className={isRefreshing ? 'animate-spin text-zinc-400' : ''}
+              />
               <span>Refresh</span>
             </button>
 
-            {/* Test Chaos Error Trigger */}
+            {/* Simulate crash */}
             <button
+              type="button"
               onClick={() => handleSimulateChaos('zero_division')}
               disabled={chaosLoading}
-              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-accent-600 to-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-md shadow-accent-600/25 transition-all hover:from-accent-500 hover:to-indigo-500 hover:shadow-lg active:scale-95 disabled:opacity-50"
+              aria-label="Simulate a production exception"
+              className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-100 px-3 py-1 font-mono text-xs font-semibold text-zinc-950 transition-colors duration-100 hover:bg-white active:bg-zinc-200 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50"
             >
-              <Zap size={14} className={chaosLoading ? 'animate-bounce' : ''} />
-              <span>{chaosLoading ? 'Triggering...' : 'Simulate Crash'}</span>
+              <Zap size={12} aria-hidden="true" />
+              <span>{chaosLoading ? 'Triggering…' : 'Trigger Chaos'}</span>
             </button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Toast Notification */}
-        {toastMessage && (
-          <div className="animate-fade-in fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-accent-500/40 bg-surface-800/95 px-4 py-3 text-sm font-medium text-white shadow-2xl backdrop-blur-md">
-            <CheckCircle2 size={18} className="text-success-400" />
-            <span>{toastMessage}</span>
-          </div>
-        )}
-
-        {/* Backend Connection Error Banner */}
+      {/* Main Workspace */}
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
+        {/* Error notification */}
         {error && (
-          <div className="mb-8 flex items-center justify-between rounded-xl border border-danger-500/30 bg-danger-500/10 p-4 text-sm text-danger-400">
-            <div className="flex items-center gap-2.5">
-              <ServerCrash size={18} />
+          <div
+            aria-live="polite"
+            className="flex items-center justify-between border border-rose-500/30 bg-rose-500/10 px-4 py-3 font-mono text-xs text-rose-300"
+          >
+            <div className="flex items-center gap-2">
+              <AlertCircle size={14} aria-hidden="true" />
               <span>
-                <strong>Connection Error:</strong> {error}. Make sure your Django backend is running at{' '}
-                <code className="font-mono text-xs text-white">http://localhost:8000</code>.
+                Backend API unreachable ({error}) — verify Django is running on port 8000.
               </span>
             </div>
             <button
+              type="button"
               onClick={() => loadData(false)}
-              className="rounded-lg bg-danger-500/20 px-3 py-1 text-xs font-medium text-white hover:bg-danger-500/30"
+              className="font-semibold underline hover:text-white"
             >
               Retry
             </button>
           </div>
         )}
 
-        {/* Metrics Summary Header */}
-        <section className="mb-8">
+        {/* Toast alert */}
+        {toastMessage && (
+          <div
+            aria-live="polite"
+            className="fixed bottom-5 right-5 z-50 flex items-center gap-2 border border-zinc-700 bg-zinc-900 px-3.5 py-2 font-mono text-xs text-zinc-100 shadow-xl"
+          >
+            <CheckCircle2 size={14} aria-hidden="true" className="text-emerald-400" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        {/* Section 1: Precision Metrics Strip */}
+        <section aria-label="Incident Summary Metrics">
           <MetricsHeader counts={counts} />
         </section>
 
-        {/* Search, Filter & View Controls */}
-        <section className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Status Filter Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-surface-800/60 p-1 backdrop-blur-xs">
+        {/* Section 2: Toolbar (Filters & Search) */}
+        <section
+          aria-label="Incident Filter Toolbar"
+          className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          {/* Status Filters */}
+          <div
+            role="tablist"
+            aria-label="Filter incidents by status"
+            className="flex flex-wrap items-center gap-1 border border-zinc-800 bg-zinc-900/60 p-1"
+          >
             {[
-              { id: 'ALL', label: 'All Errors', count: counts.total || 0 },
+              { id: 'ALL', label: 'All', count: counts.total || 0 },
               { id: 'PENDING', label: 'Pending', count: counts.pending || 0 },
               { id: 'ANALYZING', label: 'Analyzing', count: counts.analyzing || 0 },
               { id: 'TRIAGED', label: 'Triaged', count: counts.triaged || 0 },
               { id: 'FAILED', label: 'Failed', count: counts.failed || 0 },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setStatusFilter(tab.id)}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                  statusFilter === tab.id
-                    ? 'bg-surface-700 text-white shadow-xs'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                <span>{tab.label}</span>
-                <span
-                  className={`rounded-full px-1.5 py-0.2 text-[10px] ${
-                    statusFilter === tab.id ? 'bg-surface-600 text-accent-400' : 'bg-surface-700/60 text-text-muted'
+            ].map((tab) => {
+              const isSelected = statusFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={isSelected}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.id)}
+                  className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 ${
+                    isSelected
+                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200 border border-transparent'
                   }`}
                 >
-                  {tab.count}
-                </span>
-              </button>
-            ))}
+                  <span>{tab.label}</span>
+                  <span className="text-[10px] text-zinc-400 tabular-nums">
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Search input */}
+          {/* Search Box */}
           <div className="relative w-full sm:w-72">
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted" />
+            <Search
+              size={13}
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+            />
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder="Search errors, paths, messages..."
+              name="incident_search"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Search errors, routes, messages… (Press /)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-border bg-surface-800/80 py-2 pl-9 pr-3.5 text-xs text-text-primary placeholder:text-text-muted focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
+              className="w-full border border-zinc-800 bg-zinc-900/80 py-1.5 pl-8 pr-3 font-mono text-xs text-zinc-100 placeholder:text-zinc-400 focus-visible:ring-1 focus-visible:ring-zinc-400 focus-visible:border-zinc-700"
             />
           </div>
         </section>
 
-        {/* Main Incidents Table */}
-        <main>
+        {/* Section 3: Semantic Table */}
+        <main aria-label="Incident Stream">
           {loading && incidents.length === 0 ? (
-            <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-xl border border-border bg-surface-800/40">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-500 border-t-transparent" />
-              <p className="text-xs text-text-muted">Loading incident stream...</p>
+            <div
+              aria-live="polite"
+              className="flex h-48 flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 font-mono text-xs text-zinc-400"
+            >
+              Loading incident stream…
             </div>
           ) : (
             <IncidentTable
@@ -273,23 +308,22 @@ export default function App() {
           )}
         </main>
 
-        {/* Slide-over Incident Details Drawer */}
+        {/* Slide-over Inspector Drawer */}
         {selectedIncidentId && (
           <IncidentDetail
             incidentId={selectedIncidentId}
             onClose={() => setSelectedIncidentId(null)}
-            onRefreshList={() => loadData(true)}
           />
         )}
 
-        {/* Footer info */}
-        <footer className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border/60 pt-6 text-xs text-text-muted sm:flex-row">
-          <p>AutoTrace Triage Dashboard • Powered by Django, Celery & Google Gemini</p>
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-success-400" />
-              API Connected (:8000)
-            </span>
+        {/* Compact Developer Footer */}
+        <footer className="border-t border-zinc-800/80 pt-4 pb-8 flex flex-col sm:flex-row items-center justify-between gap-2 font-mono text-[11px] text-zinc-400">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+            <span>AutoTrace AI Engine • Celery Worker Active</span>
+          </div>
+          <div>
+            <span>Django REST / PostgreSQL / Gemini 3.6 Flash</span>
           </div>
         </footer>
       </div>

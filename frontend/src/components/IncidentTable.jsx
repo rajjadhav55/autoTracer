@@ -1,14 +1,13 @@
-import { Clock, ExternalLink } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 
-function formatTime(iso) {
+function formatRelativeTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   const now = new Date();
-  const diffMs = now - d;
-  const diffMin = Math.floor(diffMs / 60000);
+  const diffSec = Math.floor((now - d) / 1000);
 
-  if (diffMin < 1) return 'Just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHrs = Math.floor(diffMin / 60);
   if (diffHrs < 24) return `${diffHrs}h ago`;
@@ -16,77 +15,101 @@ function formatTime(iso) {
   return `${diffDays}d ago`;
 }
 
+function formatExactTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
 export default function IncidentTable({ incidents, selectedId, onSelect }) {
   if (!incidents || incidents.length === 0) {
     return (
-      <div className="animate-fade-in flex flex-col items-center justify-center rounded-xl border border-border bg-surface-800/40 py-20 text-center">
-        <div className="mb-3 rounded-full bg-surface-700 p-4">
-          <Clock size={28} className="text-text-muted" />
-        </div>
-        <p className="text-lg font-medium text-text-secondary">
-          No incidents yet
+      <div className="flex flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 py-16 text-center">
+        <p className="font-mono text-sm font-medium text-zinc-300">
+          No matching incident events recorded
         </p>
-        <p className="mt-1 text-sm text-text-muted">
-          Errors captured by AutoTrace will appear here
+        <p className="mt-1 text-xs text-zinc-400">
+          Trigger an error or await client ingestion to populate this view.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="animate-fade-in overflow-hidden rounded-xl border border-border bg-surface-800/40 backdrop-blur-sm">
-      {/* Table header */}
-      <div className="grid grid-cols-[1fr_1.2fr_0.8fr_0.6fr] gap-4 border-b border-border bg-surface-800/60 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
-        <span>Status</span>
-        <span>Error</span>
-        <span>Endpoint</span>
-        <span className="text-right">Time</span>
-      </div>
+    <div className="overflow-x-auto border border-zinc-800 bg-zinc-900/40">
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className="border-b border-zinc-800 bg-zinc-900/90 text-[11px] font-mono font-medium tracking-wider text-zinc-400 uppercase">
+            <th scope="col" className="py-2.5 pl-4 pr-3 w-28">Status</th>
+            <th scope="col" className="py-2.5 px-3">Exception / Message</th>
+            <th scope="col" className="py-2.5 px-3 w-48">Route / Method</th>
+            <th scope="col" className="py-2.5 pl-3 pr-4 text-right w-36">Timestamp</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-850/80 font-sans text-xs">
+          {incidents.map((incident) => {
+            const isSelected = incident.id === selectedId;
 
-      {/* Table rows */}
-      <div className="divide-y divide-border">
-        {incidents.map((incident, i) => {
-          const isSelected = incident.id === selectedId;
+            return (
+              <tr
+                key={incident.id}
+                tabIndex={0}
+                role="button"
+                aria-label={`Inspect incident ${incident.error_type} at ${incident.endpoint || 'unknown endpoint'}`}
+                onClick={() => onSelect(incident.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelect(incident.id);
+                  }
+                }}
+                className={`group cursor-pointer transition-colors duration-100 focus-visible:outline-none focus-visible:bg-zinc-800/70 ${
+                  isSelected
+                    ? 'bg-zinc-800/90 text-white'
+                    : 'text-zinc-300 hover:bg-zinc-850/60 hover:text-zinc-100'
+                }`}
+              >
+                {/* Status Column */}
+                <td className="py-2.5 pl-4 pr-3 align-middle">
+                  <StatusBadge status={incident.status} />
+                </td>
 
-          return (
-            <button
-              key={incident.id}
-              onClick={() => onSelect(incident.id)}
-              className={`grid w-full grid-cols-[1fr_1.2fr_0.8fr_0.6fr] gap-4 px-5 py-3.5 text-left text-sm transition-all duration-200 hover:bg-surface-700/50 ${
-                isSelected
-                  ? 'bg-accent-500/10 border-l-2 border-l-accent-500'
-                  : 'border-l-2 border-l-transparent'
-              }`}
-              style={{ animationDelay: `${i * 30}ms` }}
-            >
-              <div className="flex items-center">
-                <StatusBadge status={incident.status} />
-              </div>
+                {/* Error & Message Column */}
+                <td className="py-2.5 px-3 align-middle min-w-0 max-w-xs sm:max-w-md">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="font-mono text-xs font-semibold text-zinc-100 group-hover:text-white shrink-0">
+                      {incident.error_type}
+                    </span>
+                    {incident.error_message && (
+                      <span className="truncate text-xs text-zinc-400 group-hover:text-zinc-300 min-w-0">
+                        — {incident.error_message}
+                      </span>
+                    )}
+                  </div>
+                </td>
 
-              <div className="min-w-0">
-                <p className="truncate font-medium text-text-primary">
-                  {incident.error_type}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-text-muted">
-                  {incident.error_message}
-                </p>
-              </div>
+                {/* Route / Method Column */}
+                <td className="py-2.5 px-3 align-middle font-mono text-[11px] text-zinc-400">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0 rounded-[3px] bg-zinc-800 px-1 py-0.2 text-[10px] font-semibold text-zinc-300">
+                      {incident.http_method || 'POST'}
+                    </span>
+                    <span className="truncate text-zinc-300">
+                      {incident.endpoint || '/'}
+                    </span>
+                  </div>
+                </td>
 
-              <div className="flex items-center gap-1.5 text-text-secondary">
-                <span className="rounded bg-surface-700 px-1.5 py-0.5 font-mono text-xs text-text-muted">
-                  {incident.http_method || '—'}
-                </span>
-                <span className="truncate text-xs">{incident.endpoint || '—'}</span>
-              </div>
-
-              <div className="flex items-center justify-end gap-1 text-xs text-text-muted">
-                <Clock size={12} />
-                {formatTime(incident.created_at)}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+                {/* Timestamp Column */}
+                <td className="py-2.5 pl-3 pr-4 text-right align-middle font-mono text-[11px] text-zinc-400 tabular-nums">
+                  <span title={formatExactTime(incident.created_at)}>
+                    {formatRelativeTime(incident.created_at)}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
