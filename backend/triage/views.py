@@ -1,20 +1,76 @@
 import json
 import logging
 
+from django.db.models import Count
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+# pyrefly: ignore [missing-import]
+from rest_framework import generics
 # pyrefly: ignore [missing-import]
 from rest_framework.views import APIView
 # pyrefly: ignore [missing-import]
 from rest_framework.response import Response
 
 from .models import Incident
+from .serializers import IncidentListSerializer, IncidentDetailSerializer
 from .services import execute_chaos_scenario
 from .tasks import process_error_payload
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard API — list & detail views for the React frontend
+# ---------------------------------------------------------------------------
+
+class IncidentListView(generics.ListAPIView):
+    """Return a paginated list of incidents, newest first.
+
+    ``GET /api/incidents/``
+
+    The response includes a ``counts`` object in the top-level payload with
+    per-status tallies so the frontend can render metric cards without a
+    second request.
+    """
+    serializer_class = IncidentListSerializer
+    queryset = Incident.objects.all().order_by("-created_at")
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+
+        # Compute status counts across the *full* queryset (not just the page)
+        counts_qs = (
+            Incident.objects
+            .values("status")
+            .annotate(count=Count("id"))
+        )
+        counts = {row["status"]: row["count"] for row in counts_qs}
+        total = sum(counts.values())
+
+        response.data = {
+            "counts": {
+                "total": total,
+                "pending": counts.get("PENDING", 0),
+                "analyzing": counts.get("ANALYZING", 0),
+                "triaged": counts.get("TRIAGED", 0),
+                "failed": counts.get("FAILED", 0),
+                "resolved": counts.get("RESOLVED", 0),
+            },
+            "results": response.data,
+        }
+        return response
+
+
+class IncidentDetailView(generics.RetrieveAPIView):
+    """Return full detail for a single incident.
+
+    ``GET /api/incidents/<uuid>/``
+    """
+    serializer_class = IncidentDetailSerializer
+    queryset = Incident.objects.all()
+    lookup_field = "pk"
 
 
 # ---------------------------------------------------------------------------
