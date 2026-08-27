@@ -1,0 +1,18 @@
+{
+  "name": "autotrace-node",
+  "version": "0.1.0",
+  "description": "AutoTrace Node.js SDK for autonomous error tracking and AI triage",
+  "main": "index.js",
+  "keywords": [
+    "autotrace",
+    "error-tracking",
+    "ai-triage",
+    "monitoring",
+    "exception"
+  ],
+  "author": "AutoTrace Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
