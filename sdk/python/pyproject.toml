@@ -1,21 +1,46 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "autotrace"
+name = "autotrace-py"
 version = "0.1.0"
 description = "AutoTrace Python SDK for autonomous error tracking and AI triage"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
-authors = [{name = "AutoTrace Team"}]
+authors = [
+    {name = "AutoTrace Team", email = "maintainers@autotrace.io"}
+]
+keywords = ["error-tracking", "ai-triage", "gemini", "monitoring", "exceptions"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: Software Development :: Bug Tracking",
 ]
 dependencies = []
 
 [project.optional-dependencies]
 django = ["django>=3.2"]
 fastapi = ["starlette>=0.14.0"]
+
+[project.urls]
+Homepage = "https://autotrace.io"
+Repository = "https://github.com/autotrace/autotrace-py"
+Documentation = "https://docs.autotrace.io"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["autotrace*"]
+namespaces = false

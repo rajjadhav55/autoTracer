@@ -3,16 +3,31 @@
   "version": "0.1.0",
   "description": "AutoTrace Node.js SDK for autonomous error tracking and AI triage",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "integrations/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "keywords": [
     "autotrace",
     "error-tracking",
     "ai-triage",
     "monitoring",
-    "exception"
+    "exception",
+    "express",
+    "gemini"
   ],
-  "author": "AutoTrace Team",
+  "author": "AutoTrace Team <maintainers@autotrace.io>",
   "license": "MIT",
-  "engines": {
-    "node": ">=16.0.0"
-  }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/autotrace/autotrace-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/autotrace/autotrace-node/issues"
+  },
+  "homepage": "https://autotrace.io"
 }
