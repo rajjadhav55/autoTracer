@@ -1,3 +1,8 @@
 include README.md
 include pyproject.toml
 recursive-include autotrace *.py
+
+global-exclude *.py[cod] __pycache__ *.so *.dylib .DS_Store
+global-exclude test_*.py *_test.py tests/*
+global-exclude .env* *.env
+global-exclude *.log

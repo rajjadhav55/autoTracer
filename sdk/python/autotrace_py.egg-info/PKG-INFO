@@ -1,3 +1,31 @@
+Metadata-Version: 2.4
+Name: autotrace-py
+Version: 0.1.0
+Summary: AutoTrace Python SDK for autonomous error tracking and AI triage
+Author-email: AutoTrace Team <maintainers@autotrace.io>
+License: MIT
+Project-URL: Homepage, https://autotrace.io
+Project-URL: Repository, https://github.com/autotrace/autotrace-py
+Project-URL: Documentation, https://docs.autotrace.io
+Keywords: error-tracking,ai-triage,gemini,monitoring,exceptions
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: System :: Monitoring
+Classifier: Topic :: Software Development :: Bug Tracking
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Provides-Extra: django
+Requires-Dist: django>=3.2; extra == "django"
+Provides-Extra: fastapi
+Requires-Dist: starlette>=0.14.0; extra == "fastapi"
+
 # AutoTrace Python SDK (`autotrace-py`)
 
 Lightweight, zero-dependency Python client for autonomous error tracking and AI triage with [AutoTrace](https://autotrace.io).

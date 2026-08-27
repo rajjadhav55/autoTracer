@@ -1,0 +1,6 @@
+
+[django]
+django>=3.2
+
+[fastapi]
+starlette>=0.14.0
