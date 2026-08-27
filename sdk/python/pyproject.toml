@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autotrace"
+version = "0.1.0"
+description = "AutoTrace Python SDK for autonomous error tracking and AI triage"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "AutoTrace Team"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+django = ["django>=3.2"]
+fastapi = ["starlette>=0.14.0"]
