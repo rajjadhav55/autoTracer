@@ -35,14 +35,41 @@ Rules:
 """
 
 
+def _format_traceback(tb):
+    """Format traceback whether stored as string, list of frames, or dict."""
+    if isinstance(tb, list):
+        formatted = []
+        for frame in tb:
+            if isinstance(frame, dict):
+                file_name = frame.get('file') or frame.get('filename') or 'unknown'
+                line_no = frame.get('line') or frame.get('lineno') or '?'
+                func = frame.get('function') or frame.get('name') or ''
+                code = frame.get('code') or frame.get('context_line') or ''
+                formatted.append(f"  File \"{file_name}\", line {line_no}, in {func}\n    {code}".rstrip())
+            else:
+                formatted.append(str(frame))
+        return "\n".join(formatted)
+    elif isinstance(tb, dict):
+        return json.dumps(tb, indent=2)
+    return str(tb or "")
+
+
 def _build_triage_prompt(incident: "Incident") -> str:
     """Construct the user-facing prompt from incident data."""
     sections = [
         f"## Exception\n"
         f"**Type:** {incident.error_type}\n"
         f"**Message:** {incident.error_message}",
-        f"## Stack Trace\n```\n{incident.traceback}\n```",
     ]
+
+    if incident.runtime:
+        sections.append(f"**Runtime Environment:** {incident.runtime}")
+
+    if incident.project:
+        sections.append(f"**Project:** {incident.project.name}")
+
+    formatted_tb = _format_traceback(incident.traceback)
+    sections.append(f"## Stack Trace\n```\n{formatted_tb}\n```")
 
     if incident.endpoint:
         sections.append(
@@ -51,10 +78,15 @@ def _build_triage_prompt(incident: "Incident") -> str:
             f"**Endpoint:** {incident.endpoint}"
         )
 
-    if incident.request_payload:
+    if incident.context_data:
+        sections.append(
+            f"## Context Data\n"
+            f"```json\n{json.dumps(incident.context_data, indent=2, default=str)}\n```"
+        )
+    elif incident.request_payload:
         sections.append(
             f"## Request Payload (sanitized)\n"
-            f"```json\n{json.dumps(incident.request_payload, indent=2)}\n```"
+            f"```json\n{json.dumps(incident.request_payload, indent=2, default=str)}\n```"
         )
 
     return "\n\n".join(sections)
@@ -65,18 +97,28 @@ def _parse_llm_response(raw_text: str) -> dict:
 
     Handles cases where the model wraps the JSON in markdown fences.
     """
+    import re
     text = raw_text.strip()
+
     # Strip markdown code fences if present
     if text.startswith("```"):
-        # Remove opening fence (```json or ```)
         text = text.split("\n", 1)[-1]
     if text.endswith("```"):
         text = text.rsplit("```", 1)[0]
+    text = text.strip()
+    if text.startswith("json"):
+        text = text[4:].strip()
 
     try:
-        return json.loads(text.strip())
+        return json.loads(text)
     except json.JSONDecodeError:
-        # Fallback: treat entire response as root_cause
+        # Regex search for JSON object {...}
+        match = re.search(r'\{[\s\S]*\}', text)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                pass
         return {
             "root_cause": raw_text.strip(),
             "suggested_fix": "",
@@ -88,11 +130,11 @@ def _parse_llm_response(raw_text: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
-def process_incident_task(self, incident_id):
+def analyze_incident_with_ai(self, incident_id):
     """Perform AI-powered triage on an Incident.
 
     1. Fetch the Incident and set status → ANALYZING.
-    2. Build a prompt from the crash data.
+    2. Build a prompt from the crash data (type, message, traceback, runtime, context).
     3. Call Google Gemini via LangChain for root-cause analysis.
     4. Parse the LLM response and save root_cause + suggested_fix.
     5. Set status → TRIAGED (or FAILED on error).
@@ -107,8 +149,8 @@ def process_incident_task(self, incident_id):
     incident.status = "ANALYZING"
     incident.save(update_fields=["status"])
     logger.info(
-        "[AutoTrace] Picked up Incident %s (%s) for triage.",
-        incident.id, incident.error_type,
+        "[AutoTrace] Picked up Incident %s (%s, runtime=%s) for triage.",
+        incident.id, incident.error_type, incident.runtime,
     )
 
     # ── Call the LLM ────────────────────────────────────────────────────
@@ -117,7 +159,7 @@ def process_incident_task(self, incident_id):
             model="gemini-3.6-flash",
             google_api_key=_GOOGLE_API_KEY,
             temperature=0.2,
-            max_output_tokens=1024,
+            max_output_tokens=2048,
             convert_system_message_to_human=True,
         )
 
@@ -163,6 +205,10 @@ def process_incident_task(self, incident_id):
         }
         incident.save(update_fields=["status", "diagnostic_logs"])
         return {"status": "failed", "incident_id": str(incident_id), "error": str(exc)}
+
+
+# Alias for backward-compatibility
+process_incident_task = analyze_incident_with_ai
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)

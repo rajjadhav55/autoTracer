@@ -7,16 +7,16 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 # pyrefly: ignore [missing-import]
-from rest_framework import generics
+from rest_framework import generics, status
 # pyrefly: ignore [missing-import]
 from rest_framework.views import APIView
 # pyrefly: ignore [missing-import]
 from rest_framework.response import Response
 
-from .models import Incident
+from .models import Incident, Project
 from .serializers import IncidentListSerializer, IncidentDetailSerializer
 from .services import execute_chaos_scenario
-from .tasks import process_error_payload
+from .tasks import analyze_incident_with_ai, process_error_payload
 
 logger = logging.getLogger(__name__)
 
@@ -74,95 +74,148 @@ class IncidentDetailView(generics.RetrieveAPIView):
 
 
 # ---------------------------------------------------------------------------
-# SDK ingestion endpoint — receives payloads from AutoTraceMiddleware
+# Universal Error Ingestion API Endpoint
 # ---------------------------------------------------------------------------
 
-@csrf_exempt
-@require_POST
-def ingest_error_event(request):
-    """Receive an error event from a client SDK and queue it for processing.
-
-    Route: ``POST /ingest/``
-
-    Expected headers:
-        ``X-AutoTrace-Key`` — project API key (must be non-empty).
-
-    Expected body:
-        JSON matching the payload schema produced by ``AutoTraceMiddleware``::
-
-            {
-                "exception": {"type": "...", "message": "...", "traceback": [...]},
-                "request":   {"method": "...", "path": "...", "headers": {...}, "body": {...}},
-                "server":    {"server_name": "...", "server_port": "..."},
-                "timestamp": "...",
-                "sdk":       {"name": "...", "version": "..."}
-            }
-
-    Returns:
-        ``202 Accepted`` with ``{"status": "queued", "incident_id": "..."}``
-        on success, or an appropriate 4xx error.
+class UniversalIngestView(APIView):
     """
-    # ── 1. Validate API key ─────────────────────────────────────────────
-    api_key = request.META.get("HTTP_X_AUTOTRACE_KEY", "").strip()
-    if not api_key:
-        return JsonResponse(
-            {"error": "Missing or empty X-AutoTrace-Key header."},
-            status=401,
-        )
+    Universal ingestion endpoint for multi-tenant, multi-language client SDKs.
+    Route: POST /api/ingest/
 
-    # ── 2. Parse JSON body ──────────────────────────────────────────────
-    try:
-        data = json.loads(request.body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        return JsonResponse(
-            {"error": f"Invalid JSON payload: {exc}"},
-            status=400,
-        )
+    Authentication:
+        X-API-Key header required (matches a registered Project).
+        Returns 401 if missing, 403 if invalid / project does not exist.
 
-    exc_data = data.get("exception", {})
-    req_data = data.get("request", {})
-
-    if not exc_data.get("type"):
-        return JsonResponse(
-            {"error": "Payload must include 'exception.type'."},
-            status=422,
-        )
-
-    # ── 3. Persist Incident ─────────────────────────────────────────────
-    traceback_text = "\n".join(exc_data.get("traceback", []))
-
-    incident = Incident.objects.create(
-        error_type=exc_data.get("type", "UnknownError"),
-        error_message=exc_data.get("message", ""),
-        traceback=traceback_text,
-        endpoint=req_data.get("path", ""),
-        http_method=req_data.get("method", ""),
-        request_payload=req_data.get("body", {}),
-        headers=req_data.get("headers", {}),
-        status="PENDING",
-    )
-
-    # ── 4. Dispatch async processing ────────────────────────────────────
-    process_error_payload.delay(
-        str(incident.id),
+    Expected payload format:
         {
-            "server": data.get("server", {}),
-            "timestamp": data.get("timestamp", ""),
-            "sdk": data.get("sdk", {}),
-        },
-    )
+            "error_type": "ZeroDivisionError",
+            "error_message": "division by zero",
+            "endpoint": "/api/v1/checkout",
+            "runtime": "python",
+            "traceback": [ ... ] or "...",
+            "context": { ... }
+        }
+    """
+    authentication_classes = []
+    permission_classes = []
 
-    logger.info(
-        "[AutoTrace] Ingested event %s (%s) — queued for processing.",
-        incident.id,
-        incident.error_type,
-    )
+    def post(self, request, *args, **kwargs):
+        # 1. Extract API key from header (X-API-Key, case-insensitive)
+        api_key = (
+            request.headers.get("X-API-Key")
+            or request.headers.get("x-api-key")
+            or request.META.get("HTTP_X_API_KEY", "")
+        ).strip()
 
-    # ── 5. Return immediately ───────────────────────────────────────────
-    return JsonResponse(
-        {"status": "queued", "incident_id": str(incident.id)},
-        status=202,
-    )
+        # Fallback to legacy X-AutoTrace-Key if provided
+        if not api_key:
+            api_key = (
+                request.headers.get("X-AutoTrace-Key")
+                or request.META.get("HTTP_X_AUTOTRACE_KEY", "")
+            ).strip()
+
+        if not api_key:
+            return Response(
+                {"error": "Authentication required. Missing X-API-Key header."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # 2. Validate Project existence
+        try:
+            project = Project.objects.get(api_key=api_key)
+        except Project.DoesNotExist:
+            return Response(
+                {"error": "Forbidden. Invalid API key or project not found."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 3. Parse request payload
+        payload = request.data if isinstance(request.data, dict) else {}
+
+        # Universal extraction supporting both flat spec and nested SDK payloads
+        error_type = (
+            payload.get("error_type")
+            or payload.get("exception", {}).get("type")
+            or "UnknownError"
+        )
+        error_message = (
+            payload.get("error_message")
+            or payload.get("exception", {}).get("message")
+            or ""
+        )
+        endpoint = (
+            payload.get("endpoint")
+            or payload.get("request", {}).get("path")
+            or ""
+        )
+        runtime = (
+            payload.get("runtime")
+            or payload.get("sdk", {}).get("name")
+            or "generic"
+        )
+
+        traceback_data = (
+            payload.get("traceback")
+            if "traceback" in payload
+            else payload.get("exception", {}).get("traceback", [])
+        )
+
+        context_data = (
+            payload.get("context")
+            or payload.get("context_data")
+            or {
+                "request": payload.get("request", {}),
+                "server": payload.get("server", {}),
+                "sdk": payload.get("sdk", {}),
+            }
+        )
+
+        http_method = (
+            payload.get("http_method")
+            or payload.get("request", {}).get("method")
+            or context_data.get("method")
+            or ""
+        )
+
+        # 4. Save Incident tied strictly to authenticated Project
+        incident = Incident.objects.create(
+            project=project,
+            error_type=error_type,
+            error_message=error_message,
+            endpoint=endpoint,
+            runtime=runtime,
+            traceback=traceback_data,
+            context_data=context_data,
+            http_method=http_method,
+            status="PENDING",
+        )
+
+        # 5. Async Trigger to Celery
+        analyze_incident_with_ai.delay(str(incident.id))
+
+        logger.info(
+            "[AutoTrace] Ingested incident %s (%s, runtime=%s) for project '%s' (id=%s).",
+            incident.id,
+            incident.error_type,
+            incident.runtime,
+            project.name,
+            project.id,
+        )
+
+        # 6. Return 201 Created
+        return Response(
+            {
+                "status": "success",
+                "incident_id": str(incident.id),
+                "project": project.name,
+                "message": "Incident ingested and queued for AI analysis.",
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# Backward-compatible alias for existing imports / function tests
+ingest_error_event = UniversalIngestView.as_view()
 
 
 # ---------------------------------------------------------------------------
