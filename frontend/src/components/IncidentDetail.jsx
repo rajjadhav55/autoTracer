@@ -8,16 +8,20 @@ import {
   Layers,
   Sparkles,
   AlertTriangle,
+  Timer,
+  Server,
+  Code2,
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
-import { fetchIncidentDetail } from '../services/api';
+import { fetchIncidentDetail, updateIncidentStatus } from '../services/api';
 
-export default function IncidentDetail({ incidentId, onClose }) {
+export default function IncidentDetail({ incidentId, onClose, onStatusUpdated }) {
   const [incident, setIncident] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [copiedKey, setCopiedKey] = useState(null);
   const [activeTab, setActiveTab] = useState('triage');
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   useEffect(() => {
     if (!incidentId) return;
@@ -61,6 +65,38 @@ export default function IncidentDetail({ incidentId, onClose }) {
     setTimeout(() => setCopiedKey(null), 1800);
   };
 
+  const handleStatusChange = async (newStatus) => {
+    if (!incidentId || updatingStatus) return;
+    setUpdatingStatus(true);
+    try {
+      const updated = await updateIncidentStatus(incidentId, newStatus);
+      setIncident(updated);
+      if (onStatusUpdated) onStatusUpdated(updated);
+    } catch (err) {
+      console.error('Failed to update incident status:', err);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const formatStackTrace = (tb) => {
+    if (!tb) return 'No stack trace captured.';
+    if (typeof tb === 'string') return tb;
+    if (Array.isArray(tb)) {
+      return tb.map((frame) => {
+        if (typeof frame === 'object' && frame !== null) {
+          const file = frame.file || frame.filename || 'unknown';
+          const line = frame.line || frame.lineno || '?';
+          const func = frame.function || frame.name || '';
+          const code = frame.code || frame.context_line || '';
+          return `  File "${file}", line ${line}, in ${func}\n    ${code}`.trimEnd();
+        }
+        return String(frame);
+      }).join('\n');
+    }
+    return JSON.stringify(tb, null, 2);
+  };
+
   return (
     <div
       role="dialog"
@@ -76,276 +112,265 @@ export default function IncidentDetail({ incidentId, onClose }) {
       />
 
       {/* Drawer */}
-      <aside
-        className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl"
-      >
-        {/* Header Bar */}
-        <div className="border-b border-zinc-800 bg-zinc-900/90 px-5 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1 min-w-0">
-              <div className="flex items-center gap-2">
-                {incident && <StatusBadge status={incident.status} />}
-                <span className="font-mono text-[11px] text-zinc-400 tabular-nums">
-                  {incidentId}
-                </span>
-              </div>
-              <h2
-                id="incident-detail-heading"
-                className="font-mono text-base font-bold text-zinc-100 truncate"
-              >
-                {loading ? 'Loading…' : incident?.error_type || 'Incident Detail'}
-              </h2>
-              {incident?.error_message && (
-                <p className="font-mono text-xs text-zinc-400 truncate">
-                  {incident.error_message}
-                </p>
-              )}
+      <aside className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl animate-in slide-in-from-right duration-200">
+        {/* Header */}
+        <header className="flex items-start justify-between border-b border-zinc-800 px-6 py-5">
+          <div className="min-w-0 pr-4 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <StatusBadge status={incident?.status} />
+              <span className="font-mono text-xs text-zinc-400">
+                {incident?.id ? `${incident.id.slice(0, 8)}…` : ''}
+              </span>
             </div>
-
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close inspector"
-              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400"
+            <h2
+              id="incident-detail-heading"
+              className="truncate font-mono text-base font-semibold text-red-400"
             >
-              <X size={16} aria-hidden="true" />
-            </button>
+              {incident?.error_type || (loading ? 'Loading…' : 'Error Incident')}
+            </h2>
+            <p className="line-clamp-2 text-xs text-zinc-300">
+              {incident?.error_message || '—'}
+            </p>
           </div>
 
-          {/* Route details */}
-          {incident && (
-            <div className="mt-3 flex items-center gap-2 border-t border-zinc-800/80 pt-2.5 font-mono text-[11px] text-zinc-400">
-              <span className="rounded-[3px] bg-zinc-800 px-1 py-0.2 font-semibold text-zinc-200">
-                {incident.http_method || 'POST'}
-              </span>
-              <span className="text-zinc-300 truncate">{incident.endpoint || '/'}</span>
-              <span className="text-zinc-400">•</span>
-              <span className="tabular-nums text-zinc-400">
-                {incident.created_at ? new Date(incident.created_at).toUTCString() : '—'}
-              </span>
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close details panel"
+            className="shrink-0 rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </header>
 
-          {/* Tabs */}
-          <div className="mt-3 flex gap-1 border-t border-zinc-800/80 pt-2">
-            {[
-              { id: 'triage', label: 'AI Diagnosis', icon: Sparkles },
-              { id: 'traceback', label: 'Traceback', icon: Terminal },
-              { id: 'payload', label: 'Request / Headers', icon: Layers },
-              { id: 'diagnostic', label: 'Raw Logs', icon: Cpu },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
+        {/* Quick Status Bar */}
+        {incident && (
+          <div className="flex items-center justify-between border-b border-zinc-850 bg-zinc-900/50 px-6 py-2.5 text-xs font-mono">
+            <span className="text-zinc-400">Set Status:</span>
+            <div className="flex items-center gap-1.5">
+              {[
+                { id: 'PENDING', label: 'Pending' },
+                { id: 'ANALYZING', label: 'Investigating' },
+                { id: 'RESOLVED', label: 'Resolved' },
+              ].map((st) => (
                 <button
-                  key={tab.id}
+                  key={st.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 ${
-                    isActive
-                      ? 'bg-zinc-800 text-zinc-100 font-semibold border border-zinc-700'
-                      : 'text-zinc-400 hover:bg-zinc-850 hover:text-zinc-200'
+                  disabled={updatingStatus}
+                  onClick={() => handleStatusChange(st.id)}
+                  className={`px-2 py-0.5 rounded text-[11px] border transition ${
+                    incident.status === st.id
+                      ? 'bg-zinc-800 text-white border-zinc-700 font-semibold'
+                      : 'bg-zinc-950 text-zinc-400 border-zinc-850 hover:bg-zinc-800'
                   }`}
                 >
-                  <Icon size={12} aria-hidden="true" />
-                  <span>{tab.label}</span>
+                  {st.label}
                 </button>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* Tab Navigation */}
+        <nav
+          role="tablist"
+          aria-label="Incident detail views"
+          className="flex border-b border-zinc-800 bg-zinc-900/40 px-6"
+        >
+          {[
+            { id: 'triage', label: 'AI Root Cause & Fix', icon: Sparkles },
+            { id: 'stack', label: 'Stack Trace', icon: Terminal },
+            { id: 'metadata', label: 'Telemetry & Context', icon: Layers },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isSelected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={isSelected}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 border-b-2 py-3 px-3 font-mono text-xs font-medium transition-colors focus-visible:ring-1 focus-visible:ring-zinc-400 ${
+                  isSelected
+                    ? 'border-indigo-400 text-indigo-300'
+                    : 'border-transparent text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Icon size={13} aria-hidden="true" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Body Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {loading && (
-            <div
-              aria-live="polite"
-              className="flex h-48 flex-col items-center justify-center font-mono text-xs text-zinc-400"
-            >
-              Loading incident telemetry…
+            <div className="flex h-48 items-center justify-center font-mono text-xs text-zinc-400">
+              Retrieving telemetry snapshot…
             </div>
           )}
 
           {error && (
-            <div
-              aria-live="polite"
-              className="border border-rose-500/30 bg-rose-500/10 p-4 font-mono text-xs text-rose-300"
-            >
-              <div className="flex items-center gap-2 font-semibold">
-                <AlertTriangle size={14} aria-hidden="true" />
-                Error Loading Incident
-              </div>
-              <p className="mt-1 text-zinc-300">{error}</p>
+            <div className="border border-rose-500/30 bg-rose-500/10 p-4 font-mono text-xs text-rose-300">
+              {error}
             </div>
           )}
 
           {!loading && !error && incident && (
             <>
-              {/* TAB 1: AI DIAGNOSIS */}
+              {/* TAB 1: AI Root Cause & Fix */}
               {activeTab === 'triage' && (
-                <div className="space-y-4">
-                  {/* Root Cause Analysis */}
-                  <div className="border border-zinc-800 bg-zinc-900/60 p-4">
-                    <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
-                      <span className="font-mono text-[11px] font-semibold tracking-wider text-zinc-300 uppercase">
-                        Root Cause Analysis
-                      </span>
-                      <span className="font-mono text-[10px] text-zinc-400">
-                        {incident.diagnostic_logs?.llm_model || 'Gemini 3.6 Flash'}
-                      </span>
-                    </div>
-
-                    <div className="mt-3 text-xs leading-relaxed text-zinc-200 font-sans">
-                      {incident.root_cause ? (
-                        <p className="whitespace-pre-wrap">{incident.root_cause}</p>
-                      ) : (
-                        <p className="font-mono text-zinc-400 italic">
-                          {incident.status === 'ANALYZING'
-                            ? 'AI Agent is evaluating telemetry…'
-                            : 'No diagnosis generated.'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Suggested Code Fix */}
-                  <div className="border border-zinc-800 bg-zinc-900/60 p-4">
-                    <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
-                      <span className="font-mono text-[11px] font-semibold tracking-wider text-emerald-400 uppercase">
-                        Remediation / Code Fix
-                      </span>
-                      {incident.suggested_fix && (
+                <div className="space-y-6">
+                  {/* Root Cause Card */}
+                  <section aria-labelledby="root-cause-heading" className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3
+                        id="root-cause-heading"
+                        className="flex items-center gap-1.5 font-mono text-xs font-semibold tracking-wider text-zinc-200 uppercase"
+                      >
+                        <AlertTriangle size={13} className="text-amber-400" aria-hidden="true" />
+                        <span>Identified Root Cause</span>
+                      </h3>
+                      {incident.root_cause && (
                         <button
                           type="button"
-                          onClick={() => copyToClipboard(incident.suggested_fix, 'fix')}
-                          aria-label="Copy suggested fix to clipboard"
-                          className="flex items-center gap-1 font-mono text-[11px] text-zinc-400 hover:text-zinc-200"
+                          onClick={() => copyToClipboard(incident.root_cause, 'root_cause')}
+                          className="flex items-center gap-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-200"
                         >
-                          {copiedKey === 'fix' ? (
-                            <>
-                              <Check size={12} aria-hidden="true" className="text-emerald-400" />
-                              <span className="text-emerald-400">Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy size={12} aria-hidden="true" />
-                              <span>Copy Fix</span>
-                            </>
-                          )}
+                          {copiedKey === 'root_cause' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                          <span>{copiedKey === 'root_cause' ? 'Copied' : 'Copy'}</span>
                         </button>
                       )}
                     </div>
-
-                    <div className="mt-3">
-                      {incident.suggested_fix ? (
-                        <pre className="overflow-x-auto border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-200 leading-relaxed whitespace-pre-wrap">
-                          {incident.suggested_fix}
-                        </pre>
-                      ) : (
-                        <p className="font-mono text-xs text-zinc-400 italic">
-                          No remediation code available.
-                        </p>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/60 p-4 font-sans text-xs text-zinc-200 leading-relaxed">
+                      {incident.root_cause || (
+                        <span className="text-zinc-500 italic">
+                          AI agent analysis in progress or root cause not yet resolved.
+                        </span>
                       )}
                     </div>
-                  </div>
-                </div>
-              )}
+                  </section>
 
-              {/* TAB 2: STACK TRACEBACK */}
-              {activeTab === 'traceback' && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[11px] font-semibold text-zinc-400 uppercase">
-                      Raw Stack Trace
-                    </span>
-                    {incident.traceback && (
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(incident.traceback, 'trace')}
-                        aria-label="Copy stack trace"
-                        className="flex items-center gap-1 font-mono text-[11px] text-zinc-400 hover:text-zinc-200"
+                  {/* Suggested Fix Card */}
+                  <section aria-labelledby="suggested-fix-heading" className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3
+                        id="suggested-fix-heading"
+                        className="flex items-center gap-1.5 font-mono text-xs font-semibold tracking-wider text-zinc-200 uppercase"
                       >
-                        {copiedKey === 'trace' ? (
-                          <>
-                            <Check size={12} aria-hidden="true" className="text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={12} aria-hidden="true" />
-                            <span>Copy Trace</span>
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </div>
-
-                  {incident.traceback ? (
-                    <pre className="overflow-x-auto border border-zinc-800 bg-zinc-950 p-3.5 font-mono text-xs leading-relaxed text-rose-300/90 whitespace-pre-wrap">
-                      {incident.traceback}
+                        <Code2 size={13} className="text-indigo-400" aria-hidden="true" />
+                        <span>Suggested Remediation</span>
+                      </h3>
+                      {incident.suggested_fix && (
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(incident.suggested_fix, 'suggested_fix')}
+                          className="flex items-center gap-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-200"
+                        >
+                          {copiedKey === 'suggested_fix' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                          <span>{copiedKey === 'suggested_fix' ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      )}
+                    </div>
+                    <pre className="overflow-x-auto rounded border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs text-emerald-300 leading-relaxed whitespace-pre-wrap">
+                      {incident.suggested_fix || (
+                        <span className="text-zinc-500 italic">
+                          No automatic remediation generated.
+                        </span>
+                      )}
                     </pre>
-                  ) : (
-                    <p className="font-mono text-xs text-zinc-400 italic">No traceback recorded.</p>
-                  )}
+                  </section>
                 </div>
               )}
 
-              {/* TAB 3: REQUEST & HEADERS */}
-              {activeTab === 'payload' && (
-                <div className="space-y-4">
-                  {/* Headers */}
-                  <div className="border border-zinc-800 bg-zinc-900/60 p-4">
-                    <span className="font-mono text-[11px] font-semibold text-zinc-400 uppercase">
-                      Sanitized HTTP Headers
-                    </span>
-                    {incident.headers && Object.keys(incident.headers).length > 0 ? (
-                      <div className="mt-2 overflow-x-auto">
-                        <table className="w-full text-left font-mono text-xs">
-                          <tbody className="divide-y divide-zinc-850">
-                            {Object.entries(incident.headers).map(([key, val]) => (
-                              <tr key={key}>
-                                <td className="py-1.5 pr-3 text-zinc-400 w-1/3">{key}</td>
-                                <td className="py-1.5 text-zinc-200 break-all">{String(val)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <p className="mt-2 font-mono text-xs text-zinc-400 italic">No headers present.</p>
-                    )}
+              {/* TAB 2: Stack Trace */}
+              {activeTab === 'stack' && (
+                <section aria-labelledby="stack-trace-heading" className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3
+                      id="stack-trace-heading"
+                      className="flex items-center gap-1.5 font-mono text-xs font-semibold tracking-wider text-zinc-200 uppercase"
+                    >
+                      <Terminal size={13} className="text-zinc-400" aria-hidden="true" />
+                      <span>Exception Stack Frames</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(formatStackTrace(incident.stack_trace || incident.traceback), 'stack_trace')}
+                      className="flex items-center gap-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-200"
+                    >
+                      {copiedKey === 'stack_trace' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                      <span>{copiedKey === 'stack_trace' ? 'Copied' : 'Copy Trace'}</span>
+                    </button>
                   </div>
-
-                  {/* Body */}
-                  <div className="border border-zinc-800 bg-zinc-900/60 p-4">
-                    <span className="font-mono text-[11px] font-semibold text-zinc-400 uppercase">
-                      Sanitized Body Payload
-                    </span>
-                    {incident.request_payload && Object.keys(incident.request_payload).length > 0 ? (
-                      <pre className="mt-2 overflow-x-auto border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-200">
-                        {JSON.stringify(incident.request_payload, null, 2)}
-                      </pre>
-                    ) : (
-                      <p className="mt-2 font-mono text-xs text-zinc-400 italic">Empty body payload.</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 4: DIAGNOSTIC LOGS */}
-              {activeTab === 'diagnostic' && (
-                <div className="space-y-2">
-                  <span className="font-mono text-[11px] font-semibold text-zinc-400 uppercase">
-                    System Telemetry & Metadata
-                  </span>
-                  <pre className="overflow-x-auto border border-zinc-800 bg-zinc-950 p-3.5 font-mono text-xs text-zinc-300 whitespace-pre-wrap">
-                    {JSON.stringify(incident.diagnostic_logs || {}, null, 2)}
+                  <pre className="max-h-[500px] overflow-auto rounded border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs text-zinc-300 leading-relaxed whitespace-pre">
+                    {formatStackTrace(incident.stack_trace || incident.traceback)}
                   </pre>
+                </section>
+              )}
+
+              {/* TAB 3: Telemetry & Context */}
+              {activeTab === 'metadata' && (
+                <div className="space-y-6">
+                  {/* Key Properties Grid */}
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                    <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3">
+                      <span className="text-zinc-500 block mb-1 text-[10px] uppercase">Application / Service</span>
+                      <span className="text-zinc-200 font-semibold">{incident.application_name || incident.project_name || 'default-app'}</span>
+                    </div>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3">
+                      <span className="text-zinc-500 block mb-1 text-[10px] uppercase">Environment</span>
+                      <span className="text-zinc-200">{incident.context_data?.environment || 'production'}</span>
+                    </div>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3">
+                      <span className="text-zinc-500 block mb-1 text-[10px] uppercase">Runtime SDK</span>
+                      <span className="text-zinc-200">{incident.runtime || 'python'}</span>
+                    </div>
+                    <div className="rounded border border-zinc-800 bg-zinc-900/60 p-3">
+                      <span className="text-zinc-500 block mb-1 text-[10px] uppercase">Route / Endpoint</span>
+                      <span className="text-zinc-200 truncate">{incident.endpoint || '/'}</span>
+                    </div>
+                  </div>
+
+                  {/* Raw Context Data */}
+                  {incident.context_data && Object.keys(incident.context_data).length > 0 && (
+                    <section className="space-y-2">
+                      <h3 className="font-mono text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                        Client Context Snapshot
+                      </h3>
+                      <pre className="max-h-60 overflow-auto rounded border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-400">
+                        {JSON.stringify(incident.context_data, null, 2)}
+                      </pre>
+                    </section>
+                  )}
                 </div>
               )}
             </>
           )}
         </div>
+
+        {/* Footer */}
+        <footer className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900/40 px-6 py-4">
+          <div className="flex items-center gap-2 font-mono text-xs text-zinc-400">
+            {incident?.ai_duration_seconds ? (
+              <>
+                <Timer size={12} className="text-sky-400" />
+                <span>AI Triage completed in {incident.ai_duration_seconds}s</span>
+              </>
+            ) : (
+              <span>AutoTrace Engine Ready</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-zinc-700 bg-zinc-800 px-4 py-1.5 font-mono text-xs font-medium text-zinc-200 hover:bg-zinc-700 transition"
+          >
+            Close
+          </button>
+        </footer>
       </aside>
     </div>
   );

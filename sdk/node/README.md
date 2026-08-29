@@ -17,7 +17,7 @@ const autotrace = require('autotrace-node');
 
 // 1. Initialize once at startup
 autotrace.init({
-  apiKey: 'autotrace_pk_your_project_key',
+  apiKey: '<YOUR_API_KEY>',
   endpointUrl: 'http://localhost:8000/api/ingest/',
   environment: 'production',
   context: { service: 'api-gateway', version: '1.0.0' },
@@ -44,7 +44,7 @@ Place `autotrace.expressErrorHandler()` after your route handlers but before any
 const express = require('express');
 const autotrace = require('autotrace-node');
 
-autotrace.init({ apiKey: 'autotrace_pk_your_project_key' });
+autotrace.init({ apiKey: '<YOUR_API_KEY>' });
 
 const app = express();
 

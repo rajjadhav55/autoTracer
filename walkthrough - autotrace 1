@@ -1,0 +1,91 @@
+# AutoTrace: Full-Stack Boilerplate Implementation Walkthrough
+
+We have implemented the full-stack architecture for AutoTrace, including custom user authentication with auto-generated API tracking keys, error log ingestion, and a React + Tailwind CSS telemetry dashboard.
+
+---
+
+## 1. Summary of Changes
+
+### Backend (`backend/`)
+
+1. **[models.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/triage/models.py)**:
+   - **`User` (Custom User Model)**: Subclasses `AbstractUser`, auto-generates a unique `api_key` (`autotrace_pk_<hex>`), with `email` enforcement and `regenerate_api_key()`.
+   - **`ErrorLog`**: Stores `application_name`, `error_type`, `error_message`, `stack_trace`, `endpoint`, `environment`, `runtime`, `context_data`, `status`, and `timestamp`.
+   - **`Project` & `Incident`**: Enhanced with user ownership relations while retaining full compatibility with AI triage tasks and client SDKs.
+
+2. **[authentication.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/triage/authentication.py)**:
+   - **`SDKAPIKeyAuthentication`**: Custom DRF authentication backend that validates incoming SDK headers (`X-API-Key` or `Authorization: Bearer autotrace_pk_...`) and links incoming error telemetry directly to the authenticated user.
+
+3. **[serializers.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/triage/serializers.py)**:
+   - `UserRegisterSerializer`: Handles registration and password hashing.
+   - `UserSerializer`: Exposes user profile and API key.
+   - `ErrorIngestionSerializer`: Validates incoming SDK payloads from Python and Node.js SDKs.
+   - `ErrorLogSerializer` / `IncidentListSerializer` / `IncidentDetailSerializer`: Structured serializers for dashboard views.
+
+4. **[views.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/triage/views.py)**:
+   - `RegisterView` (`POST /api/auth/register/`): Signs up user, auto-generates API key, returns JWT tokens.
+   - `UserProfileView` (`GET /api/auth/me/`): Returns user profile and tracking API key.
+   - `RegenerateAPIKeyView` (`POST /api/auth/regenerate-key/`): Key rotation.
+   - `UniversalIngestView` (`POST /api/ingest/`): Ingestion endpoint linked via `SDKAPIKeyAuthentication`.
+   - `IncidentListView` (`GET /api/errors/` & `GET /api/incidents/`): Filtered error stream with live status tallies.
+   - `IncidentDetailView` (`GET/PATCH /api/errors/<uuid:pk>/`): Error inspection and status updates.
+
+5. **[settings.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/core/settings.py)** & **[urls.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/triage/urls.py)**:
+   - Configured `AUTH_USER_MODEL = 'triage.User'`.
+   - Integrated SimpleJWT and DRF permissions.
+   - Mapped all authentication, ingestion, and error routes.
+
+6. **[admin.py](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/backend/triage/admin.py)**:
+   - Registered `User`, `ErrorLog`, `Project`, `Incident`, and `PostMortem`.
+
+---
+
+### Frontend (`frontend/`)
+
+1. **[api.js](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/frontend/src/services/api.js)**:
+   - Axios instance with automatic JWT Authorization header injection.
+   - Helpers: `registerUser`, `loginUser`, `fetchUserProfile`, `regenerateApiKey`, `fetchIncidents`, `fetchIncidentDetail`, `updateIncidentStatus`, `triggerChaosScenario`.
+
+2. **[App.jsx](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/frontend/src/App.jsx)**:
+   - Added **API Tracking Key Card** with reveal/hide toggle, 1-click copy, and SDK quickstart snippet.
+   - Live metrics summary strip (Total, Unresolved, Investigating, Resolved, Failed).
+   - Search box with `/` hotkey and status filter tabs.
+   - Auth modal supporting User Sign-in and Account Registration.
+
+3. **[IncidentTable.jsx](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/frontend/src/components/IncidentTable.jsx)**:
+   - Semantic table showing Status Badge, Application name, Error type & message, Route/Method, and relative timestamp.
+
+4. **[IncidentDetail.jsx](file:///c:/Users/asus/OneDrive/Documents/Desktop/autotrace/frontend/src/components/IncidentDetail.jsx)**:
+   - Slide-over drawer with status updating buttons, syntax-highlighted stack trace with 1-click copy, AI root cause analysis, and runtime telemetry.
+
+---
+
+## 2. Verification Results
+
+- **Backend Syntax & Compilation**: Verified with `python -m py_compile` across all created/modified backend files (0 errors).
+- **Frontend Production Build**: Verified with `npm run build` (vite v8.2.2 transformed 1862 modules and built `dist/` with 0 errors in 1.58s).
+
+---
+
+## 3. How to Run & Test
+
+### Step 1: Run Migrations & Start Backend
+```bash
+# In backend/ directory
+pip install -r requirements.txt
+python manage.py makemigrations
+python manage.py migrate
+python manage.py runserver 8000
+```
+*(Or via Docker: `docker compose up --build`)*
+
+### Step 2: Start Frontend
+```bash
+# In frontend/ directory
+npm run dev
+```
+
+### Step 3: Run SDK Test Script
+```bash
+python test_python_sdk.py
+```

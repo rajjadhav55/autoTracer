@@ -1,76 +1,95 @@
 import json
 import logging
 
-from django.db.models import Count
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-
-# pyrefly: ignore [missing-import]
-from rest_framework import generics, status
-# pyrefly: ignore [missing-import]
-from rest_framework.views import APIView
-# pyrefly: ignore [missing-import]
+from django.contrib.auth import get_user_model
+from django.db.models import Count, Q
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Incident, Project
-from .serializers import IncidentListSerializer, IncidentDetailSerializer
+from .authentication import SDKAPIKeyAuthentication
+from .models import ErrorLog, Incident, Project
+from .serializers import (
+    ErrorIngestionSerializer,
+    ErrorLogSerializer,
+    IncidentDetailSerializer,
+    IncidentListSerializer,
+    UserRegisterSerializer,
+    UserSerializer,
+)
 from .services import execute_chaos_scenario
-from .tasks import analyze_incident_with_ai, process_error_payload
+from .tasks import analyze_incident_with_ai
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
 
 # ---------------------------------------------------------------------------
-# Dashboard API — list & detail views for the React frontend
+# Authentication & User Profile Views
 # ---------------------------------------------------------------------------
 
-class IncidentListView(generics.ListAPIView):
-    """Return a paginated list of incidents, newest first.
-
-    ``GET /api/incidents/``
-
-    The response includes a ``counts`` object in the top-level payload with
-    per-status tallies so the frontend can render metric cards without a
-    second request.
+class RegisterView(generics.CreateAPIView):
     """
-    serializer_class = IncidentListSerializer
-    queryset = Incident.objects.all().order_by("-created_at")
+    POST /api/auth/register/
+    Registers a new account, generates a unique API key, and returns JWT tokens.
+    """
+    queryset = User.objects.all()
+    serializer_class = UserRegisterSerializer
+    permission_classes = [permissions.AllowAny]
 
-    def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
 
-        # Compute status counts across the *full* queryset (not just the page)
-        counts_qs = (
-            Incident.objects
-            .values("status")
-            .annotate(count=Count("id"))
+        # Create default Project for the user
+        Project.objects.create(
+            user=user,
+            name=f"{user.username}-default-project",
+            api_key=user.api_key
         )
-        counts = {row["status"]: row["count"] for row in counts_qs}
-        total = sum(counts.values())
 
-        response.data = {
-            "counts": {
-                "total": total,
-                "pending": counts.get("PENDING", 0),
-                "analyzing": counts.get("ANALYZING", 0),
-                "triaged": counts.get("TRIAGED", 0),
-                "failed": counts.get("FAILED", 0),
-                "resolved": counts.get("RESOLVED", 0),
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "user": UserSerializer(user).data,
+                "tokens": {
+                    "refresh": str(refresh),
+                    "access": str(refresh.access_token),
+                },
             },
-            "results": response.data,
-        }
-        return response
+            status=status.HTTP_201_CREATED,
+        )
 
 
-class IncidentDetailView(generics.RetrieveAPIView):
-    """Return full detail for a single incident.
-
-    ``GET /api/incidents/<uuid>/``
+class UserProfileView(generics.RetrieveAPIView):
     """
-    serializer_class = IncidentDetailSerializer
-    queryset = Incident.objects.all()
-    lookup_field = "pk"
+    GET /api/auth/me/
+    Returns the authenticated user profile and tracking API key.
+    """
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+
+
+class RegenerateAPIKeyView(APIView):
+    """
+    POST /api/auth/regenerate-key/
+    Rotates the authenticated user's API tracking key.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        new_key = request.user.regenerate_api_key()
+        # Also sync project if exists
+        Project.objects.filter(user=request.user).update(api_key=new_key)
+        return Response({
+            "api_key": new_key,
+            "message": "API tracking key successfully rotated."
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -79,143 +98,213 @@ class IncidentDetailView(generics.RetrieveAPIView):
 
 class UniversalIngestView(APIView):
     """
-    Universal ingestion endpoint for multi-tenant, multi-language client SDKs.
+    Universal ingestion endpoint for client SDKs (Python, Node, Go, Rust, etc.).
     Route: POST /api/ingest/
 
     Authentication:
-        X-API-Key header required (matches a registered Project).
-        Returns 401 if missing, 403 if invalid / project does not exist.
-
-    Expected payload format:
-        {
-            "error_type": "ZeroDivisionError",
-            "error_message": "division by zero",
-            "endpoint": "/api/v1/checkout",
-            "runtime": "python",
-            "traceback": [ ... ] or "...",
-            "context": { ... }
-        }
+        X-API-Key header required (matches a registered User or Project).
     """
-    authentication_classes = []
-    permission_classes = []
+    authentication_classes = [SDKAPIKeyAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        # 1. Extract API key from header (X-API-Key, case-insensitive)
-        api_key = (
-            request.headers.get("X-API-Key")
-            or request.headers.get("x-api-key")
-            or request.META.get("HTTP_X_API_KEY", "")
-        ).strip()
-
-        # Fallback to legacy X-AutoTrace-Key if provided
-        if not api_key:
-            api_key = (
-                request.headers.get("X-AutoTrace-Key")
-                or request.META.get("HTTP_X_AUTOTRACE_KEY", "")
-            ).strip()
-
-        if not api_key:
-            return Response(
-                {"error": "Authentication required. Missing X-API-Key header."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        # 2. Validate Project existence
-        try:
-            project = Project.objects.get(api_key=api_key)
-        except Project.DoesNotExist:
-            return Response(
-                {"error": "Forbidden. Invalid API key or project not found."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # 3. Parse request payload
+        user = request.user
         payload = request.data if isinstance(request.data, dict) else {}
 
-        # Universal extraction supporting both flat spec and nested SDK payloads
-        error_type = (
-            payload.get("error_type")
-            or payload.get("exception", {}).get("type")
-            or "UnknownError"
+        serializer = ErrorIngestionSerializer(data=payload, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # 1. Resolve Project and application name
+        context_data = (
+            data.get("context")
+            or payload.get("context")
+            or payload.get("context_data")
+            or {}
         )
-        error_message = (
-            payload.get("error_message")
-            or payload.get("exception", {}).get("message")
-            or ""
-        )
-        endpoint = (
-            payload.get("endpoint")
-            or payload.get("request", {}).get("path")
-            or ""
-        )
-        runtime = (
-            payload.get("runtime")
+        app_name = (
+            data.get("application_name")
+            or context_data.get("service")
             or payload.get("sdk", {}).get("name")
-            or "generic"
+            or "default-app"
+        )
+        environment = (
+            data.get("environment")
+            or context_data.get("environment")
+            or "production"
         )
 
+        project = Project.objects.filter(user=user).first()
+        if not project:
+            project, _ = Project.objects.get_or_create(
+                user=user,
+                name=app_name,
+                defaults={"api_key": user.api_key}
+            )
+
+        # 2. Format stack trace string
         traceback_data = (
-            payload.get("traceback")
-            if "traceback" in payload
+            data.get("traceback")
+            if "traceback" in data
             else payload.get("exception", {}).get("traceback", [])
         )
+        if isinstance(traceback_data, list):
+            formatted_stack = "\n".join(str(f) for f in traceback_data)
+        else:
+            formatted_stack = str(data.get("stack_trace") or traceback_data or "")
 
-        context_data = (
-            payload.get("context")
-            or payload.get("context_data")
-            or {
-                "request": payload.get("request", {}),
-                "server": payload.get("server", {}),
-                "sdk": payload.get("sdk", {}),
-            }
+        # 3. Create ErrorLog model
+        error_log = ErrorLog.objects.create(
+            user=user,
+            application_name=app_name,
+            error_type=data.get("error_type", "UnknownError"),
+            error_message=data.get("error_message", ""),
+            stack_trace=formatted_stack,
+            endpoint=data.get("endpoint", ""),
+            environment=environment,
+            runtime=data.get("runtime", "python"),
+            context_data=context_data,
+            status="UNRESOLVED",
         )
 
-        http_method = (
-            payload.get("http_method")
-            or payload.get("request", {}).get("method")
-            or context_data.get("method")
-            or ""
-        )
-
-        # 4. Save Incident tied strictly to authenticated Project
+        # 4. Create Incident model for AI analysis
         incident = Incident.objects.create(
+            id=error_log.id,
+            user=user,
             project=project,
-            error_type=error_type,
-            error_message=error_message,
-            endpoint=endpoint,
-            runtime=runtime,
+            error_type=data.get("error_type", "UnknownError"),
+            error_message=data.get("error_message", ""),
+            endpoint=data.get("endpoint", ""),
+            runtime=data.get("runtime", "python"),
             traceback=traceback_data,
             context_data=context_data,
-            http_method=http_method,
+            http_method=payload.get("http_method", context_data.get("method", "POST")),
             status="PENDING",
         )
 
-        # 5. Async Trigger to Celery
-        analyze_incident_with_ai.delay(str(incident.id))
+        # 5. Dispatch async Celery AI triage task
+        try:
+            analyze_incident_with_ai.delay(str(incident.id))
+        except Exception as exc:
+            logger.warning("[AutoTrace] Failed to dispatch Celery AI triage task: %s", exc)
 
         logger.info(
-            "[AutoTrace] Ingested incident %s (%s, runtime=%s) for project '%s' (id=%s).",
+            "[AutoTrace] Ingested error %s (%s, runtime=%s) for user '%s'.",
             incident.id,
             incident.error_type,
             incident.runtime,
-            project.name,
-            project.id,
+            user.username,
         )
 
-        # 6. Return 201 Created
         return Response(
             {
                 "status": "success",
+                "id": str(error_log.id),
                 "incident_id": str(incident.id),
-                "project": project.name,
+                "project": project.name if project else app_name,
                 "message": "Incident ingested and queued for AI analysis.",
             },
             status=status.HTTP_201_CREATED,
         )
 
 
-# Backward-compatible alias for existing imports / function tests
+# Backward-compatible alias
 ingest_error_event = UniversalIngestView.as_view()
+
+
+# ---------------------------------------------------------------------------
+# Dashboard API — List & Detail Views
+# ---------------------------------------------------------------------------
+
+class IncidentListView(generics.ListAPIView):
+    """
+    Return a list of errors/incidents with status counts.
+    Route: GET /api/incidents/ or GET /api/errors/
+    """
+    serializer_class = IncidentListSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        qs = Incident.objects.all().order_by("-created_at")
+        if self.request.user.is_authenticated:
+            # Filter to current user's errors if authenticated
+            qs = qs.filter(Q(user=self.request.user) | Q(project__user=self.request.user))
+        
+        status_filter = self.request.query_params.get("status", "").upper()
+        search_query = self.request.query_params.get("search", "")
+
+        if status_filter and status_filter != "ALL":
+            if status_filter == "UNRESOLVED":
+                qs = qs.filter(status__in=["PENDING", "UNRESOLVED"])
+            elif status_filter == "INVESTIGATING":
+                qs = qs.filter(status__in=["ANALYZING", "INVESTIGATING"])
+            else:
+                qs = qs.filter(status=status_filter)
+
+        if search_query:
+            qs = qs.filter(
+                Q(error_type__icontains=search_query)
+                | Q(error_message__icontains=search_query)
+                | Q(endpoint__icontains=search_query)
+                | Q(project__name__icontains=search_query)
+            )
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        # Base queryset for computing overall counts
+        base_qs = Incident.objects.all()
+        if request.user.is_authenticated:
+            base_qs = base_qs.filter(Q(user=request.user) | Q(project__user=request.user))
+
+        counts_qs = base_qs.values("status").annotate(count=Count("id"))
+        counts = {row["status"]: row["count"] for row in counts_qs}
+        total = sum(counts.values())
+
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset[:100], many=True)
+
+        pending_cnt = counts.get("PENDING", 0) + counts.get("UNRESOLVED", 0)
+        analyzing_cnt = counts.get("ANALYZING", 0) + counts.get("INVESTIGATING", 0)
+        triaged_cnt = counts.get("TRIAGED", 0)
+        resolved_cnt = counts.get("RESOLVED", 0)
+        failed_cnt = counts.get("FAILED", 0) + counts.get("IGNORED", 0)
+
+        return Response({
+            "counts": {
+                "total": total,
+                "pending": pending_cnt,
+                "unresolved": pending_cnt,
+                "analyzing": analyzing_cnt,
+                "investigating": analyzing_cnt,
+                "triaged": triaged_cnt,
+                "resolved": resolved_cnt,
+                "failed": failed_cnt,
+            },
+            "results": serializer.data,
+        })
+
+
+class IncidentDetailView(generics.RetrieveUpdateAPIView):
+    """
+    Return or update full detail for a single incident.
+    Route: GET/PATCH /api/incidents/<uuid:pk>/ or GET/PATCH /api/errors/<uuid:pk>/
+    """
+    serializer_class = IncidentDetailSerializer
+    queryset = Incident.objects.all()
+    lookup_field = "pk"
+    permission_classes = [permissions.AllowAny]
+
+    def patch(self, request, *args, **kwargs):
+        incident = self.get_object()
+        new_status = request.data.get("status")
+        if new_status:
+            incident.status = new_status
+            incident.save(update_fields=["status", "updated_at"])
+            # Sync corresponding ErrorLog if present
+            ErrorLog.objects.filter(id=incident.id).update(status=new_status)
+        serializer = self.get_serializer(incident)
+        return Response(serializer.data)
 
 
 # ---------------------------------------------------------------------------
@@ -227,12 +316,9 @@ class ChaosTriggerView(APIView):
     Endpoint to simulate production failures for testing AutoTrace triage.
     Usage: POST /api/chaos/trigger/?scenario=<type>
     """
+    permission_classes = [permissions.AllowAny]
+
     def post(self, request):
-        # 1. Get the HTTP parameter
-        scenario = request.query_params.get('scenario', 'null_pointer')
-
-        # 2. Pass the data to the service layer to do the actual work
+        scenario = request.query_params.get("scenario", "zero_division")
         execute_chaos_scenario(scenario)
-
-        # 3. Return HTTP response (though the service will crash the app before this runs!)
         return Response({"status": "Success", "message": f"Scenario {scenario} triggered."})

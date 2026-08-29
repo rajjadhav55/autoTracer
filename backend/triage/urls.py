@@ -1,19 +1,37 @@
 from django.urls import path
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
 from .views import (
     ChaosTriggerView,
     IncidentDetailView,
     IncidentListView,
+    RegenerateAPIKeyView,
+    RegisterView,
     UniversalIngestView,
-    ingest_error_event,
+    UserProfileView,
 )
 
 urlpatterns = [
-    # Dashboard API — consumed by the React frontend
+    # ── Authentication & User Profile ──────────────────────────────
+    path('auth/register/', RegisterView.as_view(), name='auth-register'),
+    path('auth/login/', TokenObtainPairView.as_view(), name='token-obtain-pair'),
+    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    path('auth/me/', UserProfileView.as_view(), name='auth-me'),
+    path('auth/regenerate-key/', RegenerateAPIKeyView.as_view(), name='auth-regenerate-key'),
+
+    # ── Universal SDK Error Ingestion ──────────────────────────────
+    path('ingest/', UniversalIngestView.as_view(), name='universal-ingest'),
+    path('errors/ingest/', UniversalIngestView.as_view(), name='error-ingest'),
+
+    # ── User Dashboard & Telemetry Stream ──────────────────────────
+    path('errors/', IncidentListView.as_view(), name='error-list'),
+    path('errors/<uuid:pk>/', IncidentDetailView.as_view(), name='error-detail'),
     path('incidents/', IncidentListView.as_view(), name='incident-list'),
     path('incidents/<uuid:pk>/', IncidentDetailView.as_view(), name='incident-detail'),
-    # Universal SDK ingestion endpoint — receives error payloads from multi-language SDKs
-    path('ingest/', UniversalIngestView.as_view(), name='universal-ingest'),
-    # Chaos testing endpoint
+
+    # ── Chaos Simulation ───────────────────────────────────────────
     path('chaos/trigger/', ChaosTriggerView.as_view(), name='chaos-trigger'),
 ]
-

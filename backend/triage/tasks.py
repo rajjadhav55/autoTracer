@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 
 # pyrefly: ignore [missing-import]
 from celery import shared_task
@@ -169,10 +170,12 @@ def analyze_incident_with_ai(self, incident_id):
             ("human", user_prompt),
         ]
 
+        start_time = time.time()
         response = llm.invoke(messages)
+        ai_duration = round(time.time() - start_time, 2)
         raw_text = response.content
 
-        logger.debug("[AutoTrace] Raw LLM response for %s: %s", incident.id, raw_text)
+        logger.debug("[AutoTrace] Raw LLM response for %s (took %ss): %s", incident.id, ai_duration, raw_text)
 
         # ── Parse and persist ───────────────────────────────────────────
         parsed = _parse_llm_response(raw_text)
@@ -183,14 +186,15 @@ def analyze_incident_with_ai(self, incident_id):
             **incident.diagnostic_logs,
             "llm_raw_response": raw_text,
             "llm_model": "gemini-3.6-flash",
+            "triage_duration_seconds": ai_duration,
         }
         incident.status = "TRIAGED"
         incident.save(update_fields=[
             "root_cause", "suggested_fix", "diagnostic_logs", "status",
         ])
 
-        logger.info("[AutoTrace] Finished triage for Incident %s.", incident.id)
-        return {"status": "success", "incident_id": str(incident.id)}
+        logger.info("[AutoTrace] Finished triage for Incident %s in %ss.", incident.id, ai_duration)
+        return {"status": "success", "incident_id": str(incident.id), "duration_seconds": ai_duration}
 
     except Exception as exc:
         logger.error(

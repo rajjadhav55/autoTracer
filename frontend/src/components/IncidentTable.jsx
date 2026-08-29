@@ -1,4 +1,6 @@
+import React from 'react';
 import StatusBadge from './StatusBadge';
+import { Server, ChevronRight } from 'lucide-react';
 
 function formatRelativeTime(iso) {
   if (!iso) return '—';
@@ -23,31 +25,34 @@ function formatExactTime(iso) {
 export default function IncidentTable({ incidents, selectedId, onSelect }) {
   if (!incidents || incidents.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 py-16 text-center">
+      <div className="flex flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 py-16 text-center rounded-lg">
         <p className="font-mono text-sm font-medium text-zinc-300">
           No matching incident events recorded
         </p>
         <p className="mt-1 text-xs text-zinc-400">
-          Trigger an error or await client ingestion to populate this view.
+          Trigger an error or await client SDK ingestion to populate this view.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto border border-zinc-800 bg-zinc-900/40">
+    <div className="overflow-x-auto border border-zinc-800 bg-zinc-900/40 rounded-lg shadow-sm">
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b border-zinc-800 bg-zinc-900/90 text-[11px] font-mono font-medium tracking-wider text-zinc-400 uppercase">
-            <th scope="col" className="py-2.5 pl-4 pr-3 w-28">Status</th>
-            <th scope="col" className="py-2.5 px-3">Exception / Message</th>
-            <th scope="col" className="py-2.5 px-3 w-48">Route / Method</th>
-            <th scope="col" className="py-2.5 pl-3 pr-4 text-right w-36">Timestamp</th>
+            <th scope="col" className="py-3 pl-4 pr-3 w-28">Status</th>
+            <th scope="col" className="py-3 px-3 w-36">Application</th>
+            <th scope="col" className="py-3 px-3">Exception / Message</th>
+            <th scope="col" className="py-3 px-3 w-48">Route / Method</th>
+            <th scope="col" className="py-3 pl-3 pr-4 text-right w-36">Timestamp</th>
+            <th scope="col" className="py-3 pr-4 text-right w-20"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-850/80 font-sans text-xs">
           {incidents.map((incident) => {
             const isSelected = incident.id === selectedId;
+            const appName = incident.application_name || incident.project_name || 'default-app';
 
             return (
               <tr
@@ -69,14 +74,22 @@ export default function IncidentTable({ incidents, selectedId, onSelect }) {
                 }`}
               >
                 {/* Status Column */}
-                <td className="py-2.5 pl-4 pr-3 align-middle">
+                <td className="py-3 pl-4 pr-3 align-middle">
                   <StatusBadge status={incident.status} />
                 </td>
 
+                {/* Application Name */}
+                <td className="py-3 px-3 align-middle font-mono text-xs text-zinc-200">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Server className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    <span className="truncate">{appName}</span>
+                  </div>
+                </td>
+
                 {/* Error & Message Column */}
-                <td className="py-2.5 px-3 align-middle min-w-0 max-w-xs sm:max-w-md">
+                <td className="py-3 px-3 align-middle min-w-0 max-w-xs sm:max-w-md">
                   <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="font-mono text-xs font-semibold text-zinc-100 group-hover:text-white shrink-0">
+                    <span className="font-mono text-xs font-semibold text-red-400 group-hover:text-red-300 shrink-0">
                       {incident.error_type}
                     </span>
                     {incident.error_message && (
@@ -88,9 +101,9 @@ export default function IncidentTable({ incidents, selectedId, onSelect }) {
                 </td>
 
                 {/* Route / Method Column */}
-                <td className="py-2.5 px-3 align-middle font-mono text-[11px] text-zinc-400">
+                <td className="py-3 px-3 align-middle font-mono text-[11px] text-zinc-400">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="shrink-0 rounded-[3px] bg-zinc-800 px-1 py-0.2 text-[10px] font-semibold text-zinc-300">
+                    <span className="shrink-0 rounded-[3px] bg-zinc-800 px-1 py-0.5 text-[10px] font-semibold text-zinc-300">
                       {incident.http_method || 'POST'}
                     </span>
                     <span className="truncate text-zinc-300">
@@ -100,10 +113,15 @@ export default function IncidentTable({ incidents, selectedId, onSelect }) {
                 </td>
 
                 {/* Timestamp Column */}
-                <td className="py-2.5 pl-3 pr-4 text-right align-middle font-mono text-[11px] text-zinc-400 tabular-nums">
-                  <span title={formatExactTime(incident.created_at)}>
-                    {formatRelativeTime(incident.created_at)}
+                <td className="py-3 pl-3 pr-4 text-right align-middle font-mono text-[11px] text-zinc-400 tabular-nums">
+                  <span title={formatExactTime(incident.created_at || incident.timestamp)}>
+                    {formatRelativeTime(incident.created_at || incident.timestamp)}
                   </span>
+                </td>
+
+                {/* Action Link */}
+                <td className="py-3 pr-4 text-right align-middle">
+                  <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-zinc-200 inline-block transition-transform group-hover:translate-x-0.5" />
                 </td>
               </tr>
             );
