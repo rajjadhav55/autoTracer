@@ -8,8 +8,13 @@
 
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
-const autotrace = require(path.join(__dirname, 'sdk', 'node'));
+const nodeSdkDir = fs.existsSync(path.join(__dirname, 'node'))
+  ? path.join(__dirname, 'node')
+  : path.join(__dirname, 'sdk', 'node');
+const autotrace = require(nodeSdkDir);
+
 
 const API_KEY = 'autotrace_pk_af7ebbe94406c442e299fdf21f9a052a3bc3ad28';
 const ENDPOINT = 'http://localhost:8000/api/ingest/';

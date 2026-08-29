@@ -11,9 +11,12 @@ import os
 
 # Ensure sdk/python is in PYTHONPATH
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SDK_PATH = os.path.join(CURRENT_DIR, "sdk", "python")
+SDK_PATH = os.path.join(CURRENT_DIR, "python")
+if not os.path.exists(SDK_PATH):
+    SDK_PATH = os.path.join(CURRENT_DIR, "sdk", "python")
 if SDK_PATH not in sys.path:
     sys.path.insert(0, SDK_PATH)
+
 
 import autotrace
 

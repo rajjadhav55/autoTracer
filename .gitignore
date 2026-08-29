@@ -15,3 +15,7 @@ Thumbs.db
 # Django
 media/
 static_collected/
+
+# Agent Customizations & Skills
+.agents/
+skills-lock.json
