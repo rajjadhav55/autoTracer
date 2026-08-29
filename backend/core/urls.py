@@ -20,6 +20,8 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # This prefixes all triage URLs with /api/
+    # Support both /api/... and direct /... routes for seamless client & SDK compatibility
     path('api/', include('triage.urls')),
+    path('', include('triage.urls')),
 ]
+

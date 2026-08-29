@@ -26,7 +26,9 @@ import {
   registerUser,
   logoutUser,
   regenerateApiKey,
+  formatErrorMessage,
 } from './services/api';
+
 
 export default function App() {
   const [incidents, setIncidents] = useState([]);
@@ -90,7 +92,7 @@ export default function App() {
       setError(null);
     } catch (err) {
       console.error('Failed to load incident stream:', err);
-      setError(err.message || 'API unreachable on port 8000');
+      setError(formatErrorMessage(err));
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -134,8 +136,8 @@ export default function App() {
       showToast('Simulated incident dispatched');
       await loadData(false);
       setTimeout(() => loadData(true), 2000);
-    } catch {
-      showToast('Simulated incident dispatched');
+    } catch (err) {
+      showToast(formatErrorMessage(err));
       setTimeout(() => loadData(false), 1200);
     } finally {
       setChaosLoading(false);
@@ -157,6 +159,7 @@ export default function App() {
       showToast('API key successfully regenerated');
     } catch (err) {
       console.error('Failed to rotate API key:', err);
+      showToast(formatErrorMessage(err));
     }
   };
 
@@ -177,15 +180,12 @@ export default function App() {
       setShowAuthModal(false);
       await loadData(false);
     } catch (err) {
-      setAuthError(
-        err.response?.data?.detail ||
-        JSON.stringify(err.response?.data) ||
-        'Authentication failed. Please check credentials.'
-      );
+      setAuthError(formatErrorMessage(err));
     } finally {
       setAuthLoading(false);
     }
   };
+
 
   const handleLogout = () => {
     logoutUser();
