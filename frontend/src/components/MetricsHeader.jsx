@@ -35,18 +35,21 @@ const STATS = [
 
 export default function MetricsHeader({ counts }) {
   return (
-    <div className="grid grid-cols-2 divide-y divide-zinc-800 border border-zinc-800 bg-zinc-900/70 sm:grid-cols-5 sm:divide-x sm:divide-y-0">
-      {STATS.map((stat) => {
+    <div className="grid grid-cols-2 sm:grid-cols-5 divide-y divide-zinc-800 sm:divide-y-0 sm:divide-x divide-zinc-800 border border-zinc-800 bg-zinc-900/70 rounded-xl overflow-hidden shadow-sm">
+      {STATS.map((stat, idx) => {
         const Icon = stat.icon;
         const count = counts?.[stat.key] ?? 0;
+        const isLastOnMobile = idx === STATS.length - 1;
 
         return (
           <div
             key={stat.key}
-            className="flex flex-col justify-between px-4 py-3 sm:px-5"
+            className={`flex flex-col justify-between px-4 py-3 sm:px-5 ${
+              isLastOnMobile ? 'col-span-2 sm:col-span-1 bg-zinc-900/40 sm:bg-transparent' : ''
+            }`}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-[11px] font-medium tracking-wider text-zinc-400 uppercase">
+              <span className="font-mono text-[10px] sm:text-[11px] font-medium tracking-wider text-zinc-400 uppercase">
                 {stat.label}
               </span>
               <Icon
@@ -57,11 +60,11 @@ export default function MetricsHeader({ counts }) {
             </div>
             <div className="mt-2 flex items-baseline gap-1.5">
               <span
-                className={`font-mono text-2xl font-semibold tracking-tight tabular-nums ${stat.textColor}`}
+                className={`font-mono text-xl sm:text-2xl font-semibold tracking-tight tabular-nums ${stat.textColor}`}
               >
                 {count}
               </span>
-              <span className="text-[11px] font-mono text-zinc-400">events</span>
+              <span className="text-[10px] sm:text-[11px] font-mono text-zinc-400">events</span>
             </div>
           </div>
         );

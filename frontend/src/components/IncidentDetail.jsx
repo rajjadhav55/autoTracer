@@ -4,12 +4,10 @@ import {
   Copy,
   Check,
   Terminal,
-  Cpu,
   Layers,
   Sparkles,
   AlertTriangle,
   Timer,
-  Server,
   Code2,
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
@@ -27,13 +25,12 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
     if (!incidentId) return;
 
     let isMounted = true;
-    setLoading(true);
-    setError(null);
-
+    
     fetchIncidentDetail(incidentId)
       .then((data) => {
         if (isMounted) {
           setIncident(data);
+          setError(null);
           setLoading(false);
         }
       })
@@ -114,17 +111,17 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
       {/* Drawer */}
       <aside className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl animate-in slide-in-from-right duration-200">
         {/* Header */}
-        <header className="flex items-start justify-between border-b border-zinc-800 px-6 py-5">
-          <div className="min-w-0 pr-4 space-y-1.5">
+        <header className="flex items-start justify-between border-b border-zinc-800 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="min-w-0 pr-3 space-y-1.5">
             <div className="flex items-center gap-2">
               <StatusBadge status={incident?.status} />
-              <span className="font-mono text-xs text-zinc-400">
+              <span className="font-mono text-xs text-zinc-400 truncate">
                 {incident?.id ? `${incident.id.slice(0, 8)}…` : ''}
               </span>
             </div>
             <h2
               id="incident-detail-heading"
-              className="truncate font-mono text-base font-semibold text-red-400"
+              className="truncate font-mono text-sm sm:text-base font-semibold text-red-400"
             >
               {incident?.error_type || (loading ? 'Loading…' : 'Error Incident')}
             </h2>
@@ -137,15 +134,15 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
             type="button"
             onClick={onClose}
             aria-label="Close details panel"
-            className="shrink-0 rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400"
+            className="shrink-0 rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400 cursor-pointer"
           >
-            <X size={16} aria-hidden="true" />
+            <X size={18} aria-hidden="true" />
           </button>
         </header>
 
         {/* Quick Status Bar */}
         {incident && (
-          <div className="flex items-center justify-between border-b border-zinc-850 bg-zinc-900/50 px-6 py-2.5 text-xs font-mono">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-850 bg-zinc-900/50 px-4 py-2.5 sm:px-6 text-xs font-mono">
             <span className="text-zinc-400">Set Status:</span>
             <div className="flex items-center gap-1.5">
               {[
@@ -158,7 +155,7 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
                   type="button"
                   disabled={updatingStatus}
                   onClick={() => handleStatusChange(st.id)}
-                  className={`px-2 py-0.5 rounded text-[11px] border transition ${
+                  className={`px-2 py-0.5 rounded text-[11px] border transition cursor-pointer ${
                     incident.status === st.id
                       ? 'bg-zinc-800 text-white border-zinc-700 font-semibold'
                       : 'bg-zinc-950 text-zinc-400 border-zinc-850 hover:bg-zinc-800'
@@ -175,7 +172,7 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
         <nav
           role="tablist"
           aria-label="Incident detail views"
-          className="flex border-b border-zinc-800 bg-zinc-900/40 px-6"
+          className="flex overflow-x-auto border-b border-zinc-800 bg-zinc-900/40 px-2 sm:px-6 no-scrollbar"
         >
           {[
             { id: 'triage', label: 'AI Root Cause & Fix', icon: Sparkles },
@@ -191,9 +188,9 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
                 aria-selected={isSelected}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 border-b-2 py-3 px-3 font-mono text-xs font-medium transition-colors focus-visible:ring-1 focus-visible:ring-zinc-400 ${
+                className={`flex shrink-0 items-center gap-1.5 border-b-2 py-3 px-3 sm:px-4 font-mono text-xs font-medium transition-colors focus-visible:ring-1 focus-visible:ring-zinc-400 cursor-pointer ${
                   isSelected
-                    ? 'border-indigo-400 text-indigo-300'
+                    ? 'border-emerald-400 text-emerald-300'
                     : 'border-transparent text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -205,7 +202,7 @@ export default function IncidentDetail({ incidentId, onClose, onStatusUpdated })
         </nav>
 
         {/* Body Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
           {loading && (
             <div className="flex h-48 items-center justify-center font-mono text-xs text-zinc-400">
               Retrieving telemetry snapshot…

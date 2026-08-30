@@ -12,8 +12,13 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 from pathlib import Path
 import os
-import dj_database_url
+from urllib.parse import urlparse, unquote
 from dotenv import load_dotenv
+
+try:
+    import dj_database_url
+except ImportError:
+    dj_database_url = None
 
 # Load environment variables from backend/.env
 load_dotenv()
@@ -99,14 +104,35 @@ WSGI_APPLICATION = 'core.wsgi.application'
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
-    DATABASES = {
-        'default': dj_database_url.config(
-            default=DATABASE_URL,
-            conn_max_age=600,
-            conn_health_checks=True,
-            ssl_require=True if ('neon.tech' in DATABASE_URL or 'sslmode=require' in DATABASE_URL) else False,
-        )
-    }
+    if dj_database_url:
+        DATABASES = {
+            'default': dj_database_url.config(
+                default=DATABASE_URL,
+                conn_max_age=600,
+                conn_health_checks=True,
+                ssl_require=True if ('neon.tech' in DATABASE_URL or 'sslmode=require' in DATABASE_URL) else False,
+            )
+        }
+    else:
+        parsed_db = urlparse(DATABASE_URL)
+        path = parsed_db.path[1:] if parsed_db.path.startswith('/') else parsed_db.path
+        if '?' in path:
+            path, _ = path.split('?', 1)
+        
+        db_config = {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': unquote(path) if path else 'autotrace_db',
+            'USER': unquote(parsed_db.username or 'postgres'),
+            'PASSWORD': unquote(parsed_db.password or ''),
+            'HOST': parsed_db.hostname or 'localhost',
+            'PORT': str(parsed_db.port or 5432),
+            'CONN_MAX_AGE': 600,
+            'CONN_HEALTH_CHECKS': True,
+        }
+        if 'neon.tech' in DATABASE_URL or 'sslmode=require' in DATABASE_URL:
+            db_config['OPTIONS'] = {'sslmode': 'require'}
+            
+        DATABASES = {'default': db_config}
 else:
     DATABASES = {
         'default': {

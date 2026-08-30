@@ -20,7 +20,7 @@ if SDK_PATH not in sys.path:
 
 import autotrace
 
-API_KEY = "autotrace_pk_af7ebbe94406c442e299fdf21f9a052a3bc3ad28"
+API_KEY = "autotrace_pk_0d14558fe6e003bc9ff3aa70ac373785ea4163bd"
 ENDPOINT = "http://localhost:8000/api/ingest/"
 
 

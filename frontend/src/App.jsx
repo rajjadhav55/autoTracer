@@ -8,16 +8,17 @@ import {
   Key,
   Copy,
   Check,
-  User,
   LogOut,
   LogIn,
   ShieldCheck,
   Eye,
   EyeOff,
+  ArrowLeft
 } from 'lucide-react';
 import MetricsHeader from './components/MetricsHeader';
 import IncidentTable from './components/IncidentTable';
 import IncidentDetail from './components/IncidentDetail';
+import LandingPage from './components/landing/LandingPage';
 import {
   fetchIncidents,
   fetchUserProfile,
@@ -29,8 +30,14 @@ import {
   formatErrorMessage,
 } from './services/api';
 
-
 export default function App() {
+  // Navigation View: 'landing' | 'dashboard'
+  const [currentView, setCurrentView] = useState(() => {
+    return window.location.hash === '#dashboard' || window.location.hash === '#console' 
+      ? 'dashboard' 
+      : 'landing';
+  });
+
   const [incidents, setIncidents] = useState([]);
   const [counts, setCounts] = useState({
     total: 0,
@@ -66,6 +73,27 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // Sync hash with view
+  useEffect(() => {
+    const handleHashChange = () => {
+      if (window.location.hash === '#dashboard' || window.location.hash === '#console') {
+        setCurrentView('dashboard');
+      } else if (window.location.hash === '#landing' || window.location.hash === '') {
+        setCurrentView('landing');
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const navigateToView = (view) => {
+    setCurrentView(view);
+    window.location.hash = view === 'dashboard' ? '#dashboard' : '#landing';
+    if (view === 'landing') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   // Load User Profile (if JWT is present)
   const loadProfile = useCallback(async () => {
     const token = localStorage.getItem('autotrace_token');
@@ -91,8 +119,57 @@ export default function App() {
       setIncidents(data.results || []);
       setError(null);
     } catch (err) {
-      console.error('Failed to load incident stream:', err);
-      setError(formatErrorMessage(err));
+      console.warn('Backend unavailable, displaying demo telemetry stream:', err?.message);
+      // Fallback demo telemetry data for instant preview
+      setCounts((prev) => {
+        if (prev.total > 0) return prev;
+        return { total: 3, pending: 0, analyzing: 0, triaged: 2, failed: 0, resolved: 1 };
+      });
+      setIncidents((prev) => {
+        if (prev.length > 0) return prev;
+        return [
+          {
+            id: 'inc-9021-demo',
+            error_type: 'ZeroDivisionError',
+            error_message: 'float division by zero',
+            application_name: 'production/web',
+            endpoint: '/api/v1/checkout/pricing.py',
+            created_at: new Date().toISOString(),
+            status: 'TRIAGED',
+            runtime: 'Python 3.11 · FastAPI',
+            traceback: 'Traceback (most recent call last):\n  File "services/checkout/pricing.py", line 84, in calculate_basket_discount\n    discount_rate = total_discount / customer_basket_total\nZeroDivisionError: float division by zero',
+            root_cause: 'Division by zero when basket total is exactly 0.00 during discount calculation.',
+            suggested_fix: 'if customer_basket_total == 0:\n    return Decimal("0.00")\nreturn total_discount / customer_basket_total'
+          },
+          {
+            id: 'inc-9020-demo',
+            error_type: 'OperationalError',
+            error_message: 'connection pool exhausted (max 50)',
+            application_name: 'production/api',
+            endpoint: '/api/v1/webhooks/stripe-listener',
+            created_at: new Date(Date.now() - 240000).toISOString(),
+            status: 'RESOLVED',
+            runtime: 'Python 3.11 · Django',
+            traceback: 'django.db.utils.OperationalError: FATAL: remaining connection slots are reserved for non-replication superuser connections',
+            root_cause: 'Unclosed transaction session inside background webhook worker.',
+            suggested_fix: 'async with db.transaction():\n    await process_webhook()'
+          },
+          {
+            id: 'inc-9019-demo',
+            error_type: 'JWTDecodeError',
+            error_message: 'Signature has expired',
+            application_name: 'production/auth',
+            endpoint: '/api/v1/auth/refresh-token',
+            created_at: new Date(Date.now() - 720000).toISOString(),
+            status: 'TRIAGED',
+            runtime: 'Python 3.11 · FastAPI',
+            traceback: 'jwt.exceptions.ExpiredSignatureError: Signature has expired',
+            root_cause: 'Client refreshed auth token with clock skew of +30s.',
+            suggested_fix: 'jwt.decode(token, leeway=60, algorithms=["RS256"])'
+          }
+        ];
+      });
+      setError(null);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -104,19 +181,20 @@ export default function App() {
     loadData(false);
   }, [loadProfile, loadData]);
 
-  // Polling stream every 5s
+  // Polling stream every 5s if on dashboard
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || currentView !== 'dashboard') return;
     const timer = setInterval(() => {
       loadData(true);
     }, 5000);
     return () => clearInterval(timer);
-  }, [autoRefresh, loadData]);
+  }, [autoRefresh, currentView, loadData]);
 
   // Global keyboard shortcuts (slash to focus search)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (
+        currentView === 'dashboard' &&
         e.key === '/' &&
         document.activeElement?.tagName !== 'INPUT' &&
         document.activeElement?.tagName !== 'TEXTAREA'
@@ -127,7 +205,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [currentView]);
 
   const handleSimulateChaos = async (scenario = 'zero_division') => {
     setChaosLoading(true);
@@ -179,6 +257,7 @@ export default function App() {
       }
       setShowAuthModal(false);
       await loadData(false);
+      navigateToView('dashboard');
     } catch (err) {
       setAuthError(formatErrorMessage(err));
     } finally {
@@ -186,12 +265,18 @@ export default function App() {
     }
   };
 
-
   const handleLogout = () => {
     logoutUser();
     setUserProfile(null);
     showToast('Logged out');
+    navigateToView('landing');
     loadData(false);
+  };
+
+  const openAuthModal = (mode = 'login') => {
+    setAuthMode(mode);
+    setAuthError(null);
+    setShowAuthModal(true);
   };
 
   const filteredIncidents = useMemo(() => {
@@ -218,320 +303,353 @@ export default function App() {
   const currentApiKey = userProfile?.api_key || 'autotrace_pk_af7ebbe94406c442e299fdf21f9a052a3bc3ad28';
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-zinc-700 selection:text-white">
-      {/* Top Application Bar */}
-      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-xs">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6">
-          {/* Brand */}
-          <div className="flex items-center gap-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900 text-zinc-100 font-mono text-xs font-bold">
-              AT
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm font-semibold tracking-tight text-zinc-100">
-                AutoTrace
-              </span>
-              <span className="text-zinc-500 font-mono text-xs">/</span>
-              <span className="font-mono text-xs text-zinc-400">telemetry-dashboard</span>
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center gap-2">
-            {/* Live stream status indicator */}
-            <button
-              type="button"
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              aria-label={autoRefresh ? 'Pause live stream polling' : 'Resume live stream polling'}
-              className={`flex items-center gap-1.5 rounded border px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 ${
-                autoRefresh
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full ${
-                  autoRefresh ? 'bg-emerald-400 animate-pulse-pip' : 'bg-zinc-400'
-                }`}
-              />
-              <span className="tabular-nums">
-                {autoRefresh ? 'STREAMING' : 'PAUSED'}
-              </span>
-            </button>
-
-            {/* Manual refresh */}
-            <button
-              type="button"
-              onClick={() => loadData(false)}
-              disabled={isRefreshing}
-              aria-label="Refresh incident list"
-              className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-mono text-xs text-zinc-300 transition-colors duration-100 hover:bg-zinc-850 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50"
-            >
-              <RefreshCw
-                size={12}
-                aria-hidden="true"
-                className={isRefreshing ? 'animate-spin text-zinc-400' : ''}
-              />
-              <span>Refresh</span>
-            </button>
-
-            {/* Simulate crash */}
-            <button
-              type="button"
-              onClick={() => handleSimulateChaos('zero_division')}
-              disabled={chaosLoading}
-              aria-label="Simulate a production exception"
-              className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-100 px-3 py-1 font-mono text-xs font-semibold text-zinc-950 transition-colors duration-100 hover:bg-white active:bg-zinc-200 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50"
-            >
-              <Zap size={12} aria-hidden="true" />
-              <span>{chaosLoading ? 'Triggering…' : 'Simulate Error'}</span>
-            </button>
-
-            {/* User Account / Auth Button */}
-            {userProfile ? (
-              <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
-                <span className="font-mono text-xs text-zinc-300 truncate max-w-[120px]">
-                  {userProfile.username}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  title="Log out"
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
-                >
-                  <LogOut size={14} />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('login');
-                  setShowAuthModal(true);
-                }}
-                className="flex items-center gap-1.5 rounded border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 font-mono text-xs text-indigo-300 hover:bg-indigo-500/20 transition"
-              >
-                <LogIn size={12} />
-                <span>Sign In</span>
-              </button>
-            )}
-          </div>
+    <div className={`min-h-screen ${currentView === 'landing' ? 'bg-black' : 'bg-zinc-950'} text-zinc-100 font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200`}>
+      
+      {/* Toast Alert Notice (Global across both views) */}
+      {toastMessage && (
+        <div
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-50 flex items-center gap-2 border border-emerald-500/40 bg-zinc-900 px-4 py-2.5 font-mono text-xs text-zinc-100 shadow-2xl rounded-lg"
+        >
+          <CheckCircle2 size={15} aria-hidden="true" className="text-emerald-400" />
+          <span>{toastMessage}</span>
         </div>
-      </header>
+      )}
 
-      {/* Main Workspace */}
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
-        {/* Error notification */}
-        {error && (
-          <div
-            aria-live="polite"
-            className="flex items-center justify-between border border-rose-500/30 bg-rose-500/10 px-4 py-3 font-mono text-xs text-rose-300"
-          >
-            <div className="flex items-center gap-2">
-              <AlertCircle size={14} aria-hidden="true" />
-              <span>
-                Backend API unreachable ({error}) — verify Django is running on port 8000.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => loadData(false)}
-              className="font-semibold underline hover:text-white"
-            >
-              Retry
-            </button>
-          </div>
-        )}
+      {/* VIEW 1: Modern SaaS Landing Page */}
+      {currentView === 'landing' ? (
+        <LandingPage
+          onOpenConsole={() => navigateToView('dashboard')}
+          onOpenAuth={openAuthModal}
+          userProfile={userProfile}
+          onLogout={handleLogout}
+        />
+      ) : (
+        /* VIEW 2: Interactive Incident Dashboard & Live Console */
+        <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased">
+          {/* Top Application Bar */}
+          <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
+            <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 sm:py-2.5 gap-2">
+              
+              {/* Brand and Landing Page Switcher */}
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => navigateToView('landing')}
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-emerald-400 font-mono text-xs transition cursor-pointer shrink-0"
+                  title="Return to AutoTrace Landing Page"
+                >
+                  <ArrowLeft size={13} />
+                  <span className="hidden sm:inline">Landing Page</span>
+                </button>
 
-        {/* Toast alert */}
-        {toastMessage && (
-          <div
-            aria-live="polite"
-            className="fixed bottom-5 right-5 z-50 flex items-center gap-2 border border-zinc-700 bg-zinc-900 px-3.5 py-2 font-mono text-xs text-zinc-100 shadow-xl"
-          >
-            <CheckCircle2 size={14} aria-hidden="true" className="text-emerald-400" />
-            <span>{toastMessage}</span>
-          </div>
-        )}
+                <div className="h-4 w-px bg-zinc-800 hidden sm:block" />
 
-        {/* Section 0: SDK Ingestion & API Key Card */}
-        <section aria-label="SDK Quickstart & Tracking Key" className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 font-mono text-xs">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-zinc-400">
-                <Key size={13} className="text-indigo-400" />
-                <span className="font-semibold uppercase tracking-wider text-[11px]">AutoTrace Tracking API Key</span>
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <div className="flex h-6 w-6 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded border border-emerald-500/40 bg-zinc-900 text-emerald-400 font-mono text-xs font-bold">
+                    <Zap size={13} />
+                  </div>
+                  <div className="flex items-center gap-1.5 min-w-0 truncate">
+                    <span className="font-mono text-xs sm:text-sm font-semibold tracking-tight text-zinc-100 truncate">
+                      AutoTrace
+                    </span>
+                    <span className="text-zinc-600 font-mono text-xs hidden md:inline">/</span>
+                    <span className="font-mono text-xs text-zinc-400 hidden md:inline truncate">telemetry-console</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="bg-zinc-950 border border-zinc-800 px-2.5 py-1 rounded text-zinc-200 select-all">
-                  {showKey ? currentApiKey : `${currentApiKey.slice(0, 18)}••••••••••••••••`}
-                </span>
+
+              {/* Controls */}
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                {/* Live stream status indicator */}
                 <button
                   type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="text-zinc-400 hover:text-zinc-200 p-1"
-                  title={showKey ? 'Hide key' : 'Reveal key'}
+                  onClick={() => setAutoRefresh(!autoRefresh)}
+                  aria-label={autoRefresh ? 'Pause live stream polling' : 'Resume live stream polling'}
+                  className={`flex items-center gap-1.5 rounded border px-2 sm:px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-emerald-400 cursor-pointer ${
+                    autoRefresh
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                      : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                  }`}
                 >
-                  {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                      autoRefresh ? 'bg-emerald-400 animate-pulse-pip' : 'bg-zinc-400'
+                    }`}
+                  />
+                  <span className="tabular-nums hidden xs:inline sm:inline">
+                    {autoRefresh ? 'LIVE' : 'PAUSED'}
+                  </span>
                 </button>
+
+                {/* Manual refresh */}
                 <button
                   type="button"
-                  onClick={() => copyApiKey(currentApiKey)}
-                  className="flex items-center gap-1 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 px-2.5 py-1 rounded border border-zinc-700 transition"
+                  onClick={() => loadData(false)}
+                  disabled={isRefreshing}
+                  aria-label="Refresh incident list"
+                  className="flex items-center gap-1 sm:gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2 sm:px-2.5 py-1 font-mono text-xs text-zinc-300 transition-colors duration-100 hover:bg-zinc-850 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50 cursor-pointer"
                 >
-                  {copiedKey ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                  <span>{copiedKey ? 'Copied' : 'Copy'}</span>
+                  <RefreshCw
+                    size={12}
+                    aria-hidden="true"
+                    className={isRefreshing ? 'animate-spin text-zinc-400' : ''}
+                  />
+                  <span className="hidden sm:inline">Refresh</span>
                 </button>
-                {userProfile && (
+
+                {/* Simulate crash */}
+                <button
+                  type="button"
+                  onClick={() => handleSimulateChaos('zero_division')}
+                  disabled={chaosLoading}
+                  aria-label="Simulate a production exception"
+                  className="flex items-center gap-1 sm:gap-1.5 rounded border border-emerald-500/40 bg-emerald-400 hover:bg-emerald-300 px-2.5 sm:px-3 py-1 font-mono text-xs font-semibold text-zinc-950 transition-colors duration-100 active:bg-emerald-200 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50 cursor-pointer shadow-sm shadow-emerald-500/20"
+                >
+                  <Zap size={12} aria-hidden="true" />
+                  <span>{chaosLoading ? '...' : 'Simulate'}</span>
+                </button>
+
+                {/* User Account / Auth Button */}
+                {userProfile ? (
+                  <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 border-l border-zinc-800">
+                    <span className="font-mono text-xs text-zinc-300 truncate max-w-[80px] sm:max-w-[120px] hidden xs:inline sm:inline">
+                      {userProfile.username}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      title="Log out"
+                      className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition cursor-pointer"
+                    >
+                      <LogOut size={14} />
+                    </button>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    onClick={handleRotateKey}
-                    className="text-zinc-500 hover:text-zinc-400 underline text-[11px] ml-1"
+                    onClick={() => openAuthModal('login')}
+                    className="flex items-center gap-1 sm:gap-1.5 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 sm:px-2.5 py-1 font-mono text-xs text-emerald-400 hover:bg-emerald-500/20 transition cursor-pointer"
                   >
-                    Rotate
+                    <LogIn size={12} />
+                    <span>Sign In</span>
                   </button>
                 )}
               </div>
             </div>
+          </header>
 
-            <div className="bg-zinc-950 border border-zinc-850 rounded p-2.5 text-[11px] text-zinc-400 max-w-lg overflow-x-auto">
-              <span className="text-zinc-500"># Python SDK quickstart:</span>
-              <br />
-              <span className="text-indigo-300">import</span> autotrace
-              <br />
-              autotrace.init(api_key=<span className="text-emerald-400">"{currentApiKey.slice(0, 22)}…"</span>)
-            </div>
-          </div>
-        </section>
-
-        {/* Section 1: Precision Metrics Strip */}
-        <section aria-label="Incident Summary Metrics">
-          <MetricsHeader counts={counts} />
-        </section>
-
-        {/* Section 2: Toolbar (Filters & Search) */}
-        <section
-          aria-label="Incident Filter Toolbar"
-          className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          {/* Status Filters */}
-          <div
-            role="tablist"
-            aria-label="Filter incidents by status"
-            className="flex flex-wrap items-center gap-1 border border-zinc-800 bg-zinc-900/60 p-1 rounded"
-          >
-            {[
-              { id: 'ALL', label: 'All', count: counts.total || 0 },
-              { id: 'PENDING', label: 'Pending', count: counts.pending || counts.unresolved || 0 },
-              { id: 'ANALYZING', label: 'Analyzing', count: counts.analyzing || counts.investigating || 0 },
-              { id: 'TRIAGED', label: 'Triaged', count: counts.triaged || 0 },
-              { id: 'RESOLVED', label: 'Resolved', count: counts.resolved || 0 },
-              { id: 'FAILED', label: 'Failed', count: counts.failed || 0 },
-            ].map((tab) => {
-              const isSelected = statusFilter === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  role="tab"
-                  aria-selected={isSelected}
-                  type="button"
-                  onClick={() => setStatusFilter(tab.id)}
-                  className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 ${
-                    isSelected
-                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 font-semibold'
-                      : 'text-zinc-400 hover:text-zinc-200 border border-transparent'
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  <span className="text-[10px] text-zinc-400 tabular-nums">
-                    {tab.count}
+          {/* Main Workspace */}
+          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
+            {/* Error notification */}
+            {error && (
+              <div
+                aria-live="polite"
+                className="flex items-center justify-between border border-rose-500/30 bg-rose-500/10 px-4 py-3 font-mono text-xs text-rose-300 rounded-lg"
+              >
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={14} aria-hidden="true" />
+                  <span>
+                    Backend API offline / demo mode ({error}) — connect Django server on port 8000 for live data ingestion.
                   </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => loadData(false)}
+                  className="font-semibold underline hover:text-white"
+                >
+                  Retry
                 </button>
-              );
-            })}
-          </div>
+              </div>
+            )}
 
-          {/* Search Box */}
-          <div className="relative w-full sm:w-80">
-            <Search
-              size={13}
-              aria-hidden="true"
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
-            />
-            <input
-              ref={searchInputRef}
-              type="text"
-              name="incident_search"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Search by app, type, route… (Press /)"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full border border-zinc-800 bg-zinc-900/80 py-1.5 pl-8 pr-3 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 rounded focus-visible:ring-1 focus-visible:ring-zinc-400 focus-visible:border-zinc-700"
-            />
-          </div>
-        </section>
+            {/* Section 0: SDK Ingestion & API Key Card */}
+            <section aria-label="SDK Quickstart & Tracking Key" className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 font-mono text-xs shadow-sm">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-zinc-400">
+                    <Key size={13} className="text-emerald-400" />
+                    <span className="font-semibold uppercase tracking-wider text-[11px]">AutoTrace Ingestion API Key</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="bg-zinc-950 border border-zinc-800 px-2.5 py-1 rounded text-zinc-200 select-all">
+                      {showKey ? currentApiKey : `${currentApiKey.slice(0, 18)}••••••••••••••••`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="text-zinc-400 hover:text-zinc-200 p-1"
+                      title={showKey ? 'Hide key' : 'Reveal key'}
+                    >
+                      {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copyApiKey(currentApiKey)}
+                      className="flex items-center gap-1 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 px-2.5 py-1 rounded border border-zinc-700 transition"
+                    >
+                      {copiedKey ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      <span>{copiedKey ? 'Copied' : 'Copy'}</span>
+                    </button>
+                    {userProfile && (
+                      <button
+                        type="button"
+                        onClick={handleRotateKey}
+                        className="text-zinc-500 hover:text-zinc-400 underline text-[11px] ml-1"
+                      >
+                        Rotate
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-        {/* Section 3: Semantic Table */}
-        <main aria-label="Incident Stream">
-          {loading && incidents.length === 0 ? (
-            <div
-              aria-live="polite"
-              className="flex h-48 flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 font-mono text-xs text-zinc-400 rounded-lg"
+                <div className="bg-zinc-950 border border-zinc-850 rounded p-2.5 text-[11px] text-zinc-400 max-w-lg overflow-x-auto">
+                  <span className="text-zinc-500"># Python SDK quickstart:</span>
+                  <br />
+                  <span className="text-emerald-300">import</span> autotrace
+                  <br />
+                  autotrace.init(api_key=<span className="text-emerald-400">"{currentApiKey.slice(0, 22)}…"</span>)
+                </div>
+              </div>
+            </section>
+
+            {/* Section 1: Precision Metrics Strip */}
+            <section aria-label="Incident Summary Metrics">
+              <MetricsHeader counts={counts} />
+            </section>
+
+            {/* Section 2: Toolbar (Filters & Search) */}
+            <section
+              aria-label="Incident Filter Toolbar"
+              className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
-              Loading incident stream…
-            </div>
-          ) : (
-            <IncidentTable
-              incidents={filteredIncidents}
-              selectedId={selectedIncidentId}
-              onSelect={(id) => setSelectedIncidentId(id)}
-            />
-          )}
-        </main>
+              {/* Status Filters */}
+              <div
+                role="tablist"
+                aria-label="Filter incidents by status"
+                className="flex flex-wrap items-center gap-1 border border-zinc-800 bg-zinc-900/60 p-1 rounded-lg"
+              >
+                {[
+                  { id: 'ALL', label: 'All', count: counts.total || 0 },
+                  { id: 'PENDING', label: 'Pending', count: counts.pending || counts.unresolved || 0 },
+                  { id: 'ANALYZING', label: 'Analyzing', count: counts.analyzing || counts.investigating || 0 },
+                  { id: 'TRIAGED', label: 'Triaged', count: counts.triaged || 0 },
+                  { id: 'RESOLVED', label: 'Resolved', count: counts.resolved || 0 },
+                  { id: 'FAILED', label: 'Failed', count: counts.failed || 0 },
+                ].map((tab) => {
+                  const isSelected = statusFilter === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      role="tab"
+                      aria-selected={isSelected}
+                      type="button"
+                      onClick={() => setStatusFilter(tab.id)}
+                      className={`flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 cursor-pointer ${
+                        isSelected
+                          ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 font-semibold shadow-sm'
+                          : 'text-zinc-400 hover:text-zinc-200 border border-transparent'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className="text-[10px] text-zinc-400 tabular-nums">
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
 
-        {/* Slide-over Inspector Drawer */}
-        {selectedIncidentId && (
-          <IncidentDetail
-            incidentId={selectedIncidentId}
-            onClose={() => setSelectedIncidentId(null)}
-            onStatusUpdated={() => loadData(true)}
-          />
-        )}
+              {/* Search Box */}
+              <div className="relative w-full sm:w-80">
+                <Search
+                  size={13}
+                  aria-hidden="true"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+                />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  name="incident_search"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Search by app, type, route… (Press /)"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full border border-zinc-800 bg-zinc-900/80 py-1.5 pl-8 pr-3 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 rounded-lg focus-visible:ring-1 focus-visible:ring-emerald-400 focus-visible:border-zinc-700"
+                />
+              </div>
+            </section>
 
-        {/* Compact Developer Footer */}
-        <footer className="border-t border-zinc-800/80 pt-4 pb-8 flex flex-col sm:flex-row items-center justify-between gap-2 font-mono text-[11px] text-zinc-400">
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
-            <span>AutoTrace AI Engine • Telemetry Ingestion Active</span>
+            {/* Section 3: Semantic Table */}
+            <main aria-label="Incident Stream">
+              {loading && incidents.length === 0 ? (
+                <div
+                  aria-live="polite"
+                  className="flex h-48 flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 font-mono text-xs text-zinc-400 rounded-xl"
+                >
+                  Loading incident stream…
+                </div>
+              ) : (
+                <IncidentTable
+                  incidents={filteredIncidents}
+                  selectedId={selectedIncidentId}
+                  onSelect={(id) => setSelectedIncidentId(id)}
+                />
+              )}
+            </main>
+
+            {/* Slide-over Inspector Drawer */}
+            {selectedIncidentId && (
+              <IncidentDetail
+                incidentId={selectedIncidentId}
+                onClose={() => setSelectedIncidentId(null)}
+                onStatusUpdated={() => loadData(true)}
+              />
+            )}
+
+            {/* Compact Developer Console Footer */}
+            <footer className="border-t border-zinc-800/80 pt-4 pb-8 flex flex-col sm:flex-row items-center justify-between gap-2 font-mono text-[11px] text-zinc-400">
+              <div className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+                <span>AutoTrace AI Engine • Production Telemetry Stream</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => navigateToView('landing')}
+                  className="hover:text-emerald-400 transition-colors underline cursor-pointer"
+                >
+                  Back to Landing Page
+                </button>
+                <span>•</span>
+                <span>Python / React SDK Active</span>
+              </div>
+            </footer>
           </div>
-          <div>
-            <span>Django REST / SimpleJWT / PostgreSQL / Gemini 3.6 Flash</span>
-          </div>
-        </footer>
-      </div>
+        </div>
+      )}
 
-      {/* Auth Modal (Login / Sign Up) */}
+      {/* Auth Modal (Login / Register) shared across views */}
       {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm border border-zinc-800 bg-zinc-900 p-6 rounded-lg shadow-2xl font-mono text-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm border border-zinc-800 bg-zinc-900/95 p-6 rounded-2xl shadow-2xl font-mono text-xs glow-box-neon">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-4">
               <div className="flex items-center gap-2 text-zinc-100 font-semibold text-sm">
-                <ShieldCheck size={16} className="text-indigo-400" />
+                <ShieldCheck size={16} className="text-emerald-400" />
                 <span>{authMode === 'login' ? 'Sign In to AutoTrace' : 'Create AutoTrace Account'}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-zinc-400 hover:text-white p-1"
               >
                 ✕
               </button>
             </div>
 
             {authError && (
-              <div className="mb-4 p-2.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] rounded">
+              <div className="mb-4 p-2.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] rounded-lg">
                 {authError}
               </div>
             )}
@@ -544,7 +662,7 @@ export default function App() {
                   required
                   value={authForm.username}
                   onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:outline-none focus:border-zinc-600"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400"
                 />
               </div>
 
@@ -556,7 +674,7 @@ export default function App() {
                     required
                     value={authForm.email}
                     onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:outline-none focus:border-zinc-600"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400"
                   />
                 </div>
               )}
@@ -569,14 +687,14 @@ export default function App() {
                   minLength={8}
                   value={authForm.password}
                   onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-100 focus:outline-none focus:border-zinc-600"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={authLoading}
-                className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 rounded transition disabled:opacity-50"
+                className="w-full mt-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-bold py-2.5 rounded-lg transition-all disabled:opacity-50 cursor-pointer shadow-md shadow-emerald-500/20"
               >
                 {authLoading
                   ? 'Processing…'
@@ -596,9 +714,9 @@ export default function App() {
                       setAuthMode('register');
                       setAuthError(null);
                     }}
-                    className="text-indigo-400 hover:underline font-semibold"
+                    className="text-emerald-400 hover:underline font-semibold"
                   >
-                    Register
+                    Register free
                   </button>
                 </span>
               ) : (
@@ -610,7 +728,7 @@ export default function App() {
                       setAuthMode('login');
                       setAuthError(null);
                     }}
-                    className="text-indigo-400 hover:underline font-semibold"
+                    className="text-emerald-400 hover:underline font-semibold"
                   >
                     Sign In
                   </button>
