@@ -1,28 +1,28 @@
 const STATUS_MAP = {
   PENDING: {
     label: 'PENDING',
-    dotClass: 'bg-amber-400',
-    badgeClass: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
+    dotClass: 'bg-amber-400 animate-pulse',
+    badgeClass: 'border-amber-500/30 bg-amber-500/10 text-amber-300 shadow-sm shadow-amber-500/10',
   },
   ANALYZING: {
     label: 'ANALYZING',
-    dotClass: 'bg-sky-400 animate-pulse-pip',
-    badgeClass: 'border-sky-500/25 bg-sky-500/10 text-sky-300',
+    dotClass: 'bg-sky-400 animate-pulse',
+    badgeClass: 'border-sky-500/30 bg-sky-500/10 text-sky-300 shadow-sm shadow-sky-500/10',
   },
   TRIAGED: {
-    label: 'TRIAGED',
-    dotClass: 'bg-emerald-400',
-    badgeClass: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+    label: 'AI TRIAGED',
+    dotClass: 'bg-emerald-400 shadow-sm shadow-emerald-400/50',
+    badgeClass: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-sm shadow-emerald-500/15',
   },
   FAILED: {
     label: 'FAILED',
     dotClass: 'bg-rose-400',
-    badgeClass: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
+    badgeClass: 'border-rose-500/30 bg-rose-500/10 text-rose-300 shadow-sm shadow-rose-500/10',
   },
   RESOLVED: {
     label: 'RESOLVED',
     dotClass: 'bg-zinc-400',
-    badgeClass: 'border-zinc-700 bg-zinc-800 text-zinc-300',
+    badgeClass: 'border-zinc-700/80 bg-zinc-850/80 text-zinc-300',
   },
 };
 
@@ -31,11 +31,11 @@ export default function StatusBadge({ status }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-[4px] border px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide uppercase ${meta.badgeClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider uppercase transition-colors ${meta.badgeClass}`}
     >
       <span
         aria-hidden="true"
-        className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`}
+        className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta.dotClass}`}
       />
       <span>{meta.label}</span>
     </span>

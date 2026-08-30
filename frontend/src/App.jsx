@@ -326,17 +326,22 @@ export default function App() {
         />
       ) : (
         /* VIEW 2: Interactive Incident Dashboard & Live Console */
-        <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased">
-          {/* Top Application Bar */}
-          <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
-            <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 sm:py-2.5 gap-2">
+        <div className="min-h-screen bg-black text-zinc-100 font-sans antialiased relative overflow-x-hidden">
+          
+          {/* Ambient Background Glow Accents matching Landing Page */}
+          <div className="pointer-events-none absolute -top-40 right-1/4 w-[600px] h-[350px] bg-emerald-500/10 blur-[150px] -z-10" />
+          <div className="pointer-events-none absolute top-1/2 left-1/4 w-[500px] h-[300px] bg-emerald-500/5 blur-[140px] -z-10" />
+
+          {/* Top Glass Application Bar */}
+          <header className="sticky top-0 z-30 border-b border-zinc-850/80 bg-zinc-950/85 backdrop-blur-xl shadow-2xl shadow-black/60">
+            <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-3 sm:px-6 sm:py-3.5 gap-2">
               
               {/* Brand and Landing Page Switcher */}
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="flex items-center gap-3 sm:gap-4 min-w-0">
                 <button
                   type="button"
                   onClick={() => navigateToView('landing')}
-                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-emerald-400 font-mono text-xs transition cursor-pointer shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-700/80 hover:border-zinc-500 text-zinc-300 hover:text-white font-mono text-xs transition-all duration-200 shadow-inner backdrop-blur-md cursor-pointer shrink-0"
                   title="Return to AutoTrace Landing Page"
                 >
                   <ArrowLeft size={13} />
@@ -345,12 +350,14 @@ export default function App() {
 
                 <div className="h-4 w-px bg-zinc-800 hidden sm:block" />
 
-                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                  <div className="flex h-6 w-6 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded border border-emerald-500/40 bg-zinc-900 text-emerald-400 font-mono text-xs font-bold">
-                    <Zap size={13} />
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-zinc-900 border border-zinc-700/80">
+                    <div className="w-3.5 h-3.5 rounded-full border border-emerald-400/80 flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 min-w-0 truncate">
-                    <span className="font-mono text-xs sm:text-sm font-semibold tracking-tight text-zinc-100 truncate">
+                    <span className="font-sans text-sm sm:text-base font-bold tracking-tight text-white truncate">
                       AutoTrace
                     </span>
                     <span className="text-zinc-600 font-mono text-xs hidden md:inline">/</span>
@@ -360,26 +367,26 @@ export default function App() {
               </div>
 
               {/* Controls */}
-              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                 {/* Live stream status indicator */}
                 <button
                   type="button"
                   onClick={() => setAutoRefresh(!autoRefresh)}
                   aria-label={autoRefresh ? 'Pause live stream polling' : 'Resume live stream polling'}
-                  className={`flex items-center gap-1.5 rounded border px-2 sm:px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-emerald-400 cursor-pointer ${
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-xs transition-all duration-200 focus-visible:ring-1 focus-visible:ring-emerald-400 cursor-pointer ${
                     autoRefresh
-                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                      : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-sm shadow-emerald-500/10'
+                      : 'border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   <span
                     aria-hidden="true"
                     className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                      autoRefresh ? 'bg-emerald-400 animate-pulse-pip' : 'bg-zinc-400'
+                      autoRefresh ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
                     }`}
                   />
                   <span className="tabular-nums hidden xs:inline sm:inline">
-                    {autoRefresh ? 'LIVE' : 'PAUSED'}
+                    {autoRefresh ? 'STREAMING (60 FPS)' : 'PAUSED'}
                   </span>
                 </button>
 
@@ -389,12 +396,12 @@ export default function App() {
                   onClick={() => loadData(false)}
                   disabled={isRefreshing}
                   aria-label="Refresh incident list"
-                  className="flex items-center gap-1 sm:gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2 sm:px-2.5 py-1 font-mono text-xs text-zinc-300 transition-colors duration-100 hover:bg-zinc-850 hover:text-zinc-100 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50 cursor-pointer"
+                  className="flex items-center gap-1.5 rounded-full border border-zinc-750 bg-zinc-900/80 px-3 py-1.5 font-mono text-xs text-zinc-300 transition-all duration-200 hover:bg-zinc-800 hover:text-white focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50 cursor-pointer"
                 >
                   <RefreshCw
                     size={12}
                     aria-hidden="true"
-                    className={isRefreshing ? 'animate-spin text-zinc-400' : ''}
+                    className={isRefreshing ? 'animate-spin text-emerald-400' : ''}
                   />
                   <span className="hidden sm:inline">Refresh</span>
                 </button>
@@ -405,23 +412,23 @@ export default function App() {
                   onClick={() => handleSimulateChaos('zero_division')}
                   disabled={chaosLoading}
                   aria-label="Simulate a production exception"
-                  className="flex items-center gap-1 sm:gap-1.5 rounded border border-emerald-500/40 bg-emerald-400 hover:bg-emerald-300 px-2.5 sm:px-3 py-1 font-mono text-xs font-semibold text-zinc-950 transition-colors duration-100 active:bg-emerald-200 focus-visible:ring-1 focus-visible:ring-zinc-400 disabled:opacity-50 cursor-pointer shadow-sm shadow-emerald-500/20"
+                  className="flex items-center gap-1.5 rounded-full font-semibold text-xs bg-emerald-400 hover:bg-emerald-300 text-zinc-950 px-4 py-1.5 transition-all duration-200 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-400/40 hover:scale-105 cursor-pointer disabled:opacity-50"
                 >
-                  <Zap size={12} aria-hidden="true" />
-                  <span>{chaosLoading ? '...' : 'Simulate'}</span>
+                  <Zap size={13} aria-hidden="true" />
+                  <span>{chaosLoading ? 'Triggering…' : 'Simulate Error'}</span>
                 </button>
 
                 {/* User Account / Auth Button */}
                 {userProfile ? (
-                  <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 border-l border-zinc-800">
-                    <span className="font-mono text-xs text-zinc-300 truncate max-w-[80px] sm:max-w-[120px] hidden xs:inline sm:inline">
+                  <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+                    <span className="font-mono text-xs text-zinc-200 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full truncate max-w-[120px] hidden xs:inline sm:inline">
                       {userProfile.username}
                     </span>
                     <button
                       type="button"
                       onClick={handleLogout}
                       title="Log out"
-                      className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition cursor-pointer"
+                      className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition cursor-pointer"
                     >
                       <LogOut size={14} />
                     </button>
@@ -430,7 +437,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => openAuthModal('login')}
-                    className="flex items-center gap-1 sm:gap-1.5 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 sm:px-2.5 py-1 font-mono text-xs text-emerald-400 hover:bg-emerald-500/20 transition cursor-pointer"
+                    className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 font-mono text-xs text-emerald-400 hover:bg-emerald-500/20 transition cursor-pointer"
                   >
                     <LogIn size={12} />
                     <span>Sign In</span>
@@ -441,12 +448,12 @@ export default function App() {
           </header>
 
           {/* Main Workspace */}
-          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
+          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 space-y-7">
             {/* Error notification */}
             {error && (
               <div
                 aria-live="polite"
-                className="flex items-center justify-between border border-rose-500/30 bg-rose-500/10 px-4 py-3 font-mono text-xs text-rose-300 rounded-lg"
+                className="flex items-center justify-between border border-rose-500/30 bg-rose-500/10 px-4 py-3 font-mono text-xs text-rose-300 rounded-xl"
               >
                 <div className="flex items-center gap-2">
                   <AlertCircle size={14} aria-hidden="true" />
@@ -457,29 +464,31 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => loadData(false)}
-                  className="font-semibold underline hover:text-white"
+                  className="font-semibold underline hover:text-white cursor-pointer"
                 >
                   Retry
                 </button>
               </div>
             )}
 
-            {/* Section 0: SDK Ingestion & API Key Card */}
-            <section aria-label="SDK Quickstart & Tracking Key" className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 font-mono text-xs shadow-sm">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div className="space-y-1.5">
+            {/* Section 0: SDK Ingestion & API Key Bento Terminal Box */}
+            <section aria-label="SDK Quickstart & Tracking Key" className="rounded-2xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-xl p-5 font-mono text-xs shadow-2xl glow-box-neon">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+                <div className="space-y-2">
                   <div className="flex items-center gap-2 text-zinc-400">
-                    <Key size={13} className="text-emerald-400" />
-                    <span className="font-semibold uppercase tracking-wider text-[11px]">AutoTrace Ingestion API Key</span>
+                    <Key size={14} className="text-emerald-400" />
+                    <span className="font-semibold uppercase tracking-wider text-[11px] text-zinc-300">
+                      AutoTrace Ingestion API Key
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="bg-zinc-950 border border-zinc-800 px-2.5 py-1 rounded text-zinc-200 select-all">
+                    <span className="bg-zinc-950 border border-zinc-800 px-3 py-1.5 rounded-lg text-zinc-200 select-all font-mono">
                       {showKey ? currentApiKey : `${currentApiKey.slice(0, 18)}••••••••••••••••`}
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowKey(!showKey)}
-                      className="text-zinc-400 hover:text-zinc-200 p-1"
+                      className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-md hover:bg-zinc-800 transition cursor-pointer"
                       title={showKey ? 'Hide key' : 'Reveal key'}
                     >
                       {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -487,16 +496,16 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => copyApiKey(currentApiKey)}
-                      className="flex items-center gap-1 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 px-2.5 py-1 rounded border border-zinc-700 transition"
+                      className="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 px-3 py-1.5 rounded-lg border border-zinc-700 transition cursor-pointer"
                     >
-                      {copiedKey ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                      <span>{copiedKey ? 'Copied' : 'Copy'}</span>
+                      {copiedKey ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                      <span>{copiedKey ? 'Copied' : 'Copy Key'}</span>
                     </button>
                     {userProfile && (
                       <button
                         type="button"
                         onClick={handleRotateKey}
-                        className="text-zinc-500 hover:text-zinc-400 underline text-[11px] ml-1"
+                        className="text-zinc-500 hover:text-emerald-400 underline text-[11px] ml-1 transition cursor-pointer"
                       >
                         Rotate
                       </button>
@@ -504,12 +513,16 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-zinc-950 border border-zinc-850 rounded p-2.5 text-[11px] text-zinc-400 max-w-lg overflow-x-auto">
-                  <span className="text-zinc-500"># Python SDK quickstart:</span>
+                <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 text-[11px] text-zinc-400 max-w-lg overflow-x-auto shadow-inner">
+                  <div className="flex items-center gap-2 pb-2 mb-2 border-b border-zinc-850 text-[10px] text-zinc-500">
+                    <span className="w-2 h-2 rounded-full bg-rose-500/80 inline-block" />
+                    <span className="w-2 h-2 rounded-full bg-amber-500/80 inline-block" />
+                    <span className="w-2 h-2 rounded-full bg-emerald-500/80 inline-block" />
+                    <span>quickstart.py</span>
+                  </div>
+                  <span className="text-emerald-400 font-bold">import</span> autotrace
                   <br />
-                  <span className="text-emerald-300">import</span> autotrace
-                  <br />
-                  autotrace.init(api_key=<span className="text-emerald-400">"{currentApiKey.slice(0, 22)}…"</span>)
+                  autotrace.init(api_key=<span className="text-emerald-300">"{currentApiKey.slice(0, 22)}…"</span>)
                 </div>
               </div>
             </section>
@@ -524,11 +537,11 @@ export default function App() {
               aria-label="Incident Filter Toolbar"
               className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
-              {/* Status Filters */}
+              {/* Status Filters - Rounded Pills */}
               <div
                 role="tablist"
                 aria-label="Filter incidents by status"
-                className="flex flex-wrap items-center gap-1 border border-zinc-800 bg-zinc-900/60 p-1 rounded-lg"
+                className="flex flex-wrap items-center gap-1.5 bg-zinc-900/60 border border-zinc-800/80 p-1.5 rounded-full backdrop-blur-xl"
               >
                 {[
                   { id: 'ALL', label: 'All', count: counts.total || 0 },
@@ -546,14 +559,14 @@ export default function App() {
                       aria-selected={isSelected}
                       type="button"
                       onClick={() => setStatusFilter(tab.id)}
-                      className={`flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 font-mono text-xs transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-zinc-400 cursor-pointer ${
+                      className={`flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-mono transition-all duration-200 cursor-pointer ${
                         isSelected
-                          ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 font-semibold shadow-sm'
+                          ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40 font-semibold shadow-sm shadow-emerald-500/10'
                           : 'text-zinc-400 hover:text-zinc-200 border border-transparent'
                       }`}
                     >
                       <span>{tab.label}</span>
-                      <span className="text-[10px] text-zinc-400 tabular-nums">
+                      <span className={`text-[10px] tabular-nums ${isSelected ? 'text-emerald-300' : 'text-zinc-500'}`}>
                         {tab.count}
                       </span>
                     </button>
@@ -564,9 +577,9 @@ export default function App() {
               {/* Search Box */}
               <div className="relative w-full sm:w-80">
                 <Search
-                  size={13}
+                  size={14}
                   aria-hidden="true"
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
                 />
                 <input
                   ref={searchInputRef}
@@ -574,11 +587,14 @@ export default function App() {
                   name="incident_search"
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="Search by app, type, route… (Press /)"
+                  placeholder="Search by service, type, path… (Press /)"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full border border-zinc-800 bg-zinc-900/80 py-1.5 pl-8 pr-3 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 rounded-lg focus-visible:ring-1 focus-visible:ring-emerald-400 focus-visible:border-zinc-700"
+                  className="w-full border border-zinc-800/80 bg-zinc-900/80 backdrop-blur-xl py-2 pl-9 pr-8 font-mono text-xs text-zinc-100 placeholder:text-zinc-500 rounded-full focus:outline-none focus:border-emerald-400/80 focus:ring-1 focus:ring-emerald-400/50 shadow-inner"
                 />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-zinc-500 border border-zinc-700/80 rounded px-1">
+                  /
+                </span>
               </div>
             </section>
 
@@ -587,9 +603,10 @@ export default function App() {
               {loading && incidents.length === 0 ? (
                 <div
                   aria-live="polite"
-                  className="flex h-48 flex-col items-center justify-center border border-zinc-800 bg-zinc-900/40 font-mono text-xs text-zinc-400 rounded-xl"
+                  className="flex h-48 flex-col items-center justify-center border border-zinc-800/80 bg-zinc-900/50 backdrop-blur-xl font-mono text-xs text-zinc-400 rounded-2xl glow-box-neon gap-2"
                 >
-                  Loading incident stream…
+                  <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                  <span>Loading live telemetry stream…</span>
                 </div>
               ) : (
                 <IncidentTable
@@ -610,10 +627,10 @@ export default function App() {
             )}
 
             {/* Compact Developer Console Footer */}
-            <footer className="border-t border-zinc-800/80 pt-4 pb-8 flex flex-col sm:flex-row items-center justify-between gap-2 font-mono text-[11px] text-zinc-400">
+            <footer className="border-t border-zinc-850 pt-5 pb-8 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-500">
               <div className="flex items-center gap-2">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
-                <span>AutoTrace AI Engine • Production Telemetry Stream</span>
+                <span>AutoTrace AI Triage Engine • Production Telemetry Stream</span>
               </div>
               <div className="flex items-center gap-3">
                 <button 
@@ -623,7 +640,7 @@ export default function App() {
                   Back to Landing Page
                 </button>
                 <span>•</span>
-                <span>Python / React SDK Active</span>
+                <span>Python &amp; React SDK Active</span>
               </div>
             </footer>
           </div>
@@ -632,9 +649,9 @@ export default function App() {
 
       {/* Auth Modal (Login / Register) shared across views */}
       {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm border border-zinc-800 bg-zinc-900/95 p-6 rounded-2xl shadow-2xl font-mono text-xs glow-box-neon">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="w-full max-w-sm border border-zinc-800 bg-zinc-950/95 p-6 rounded-2xl shadow-2xl font-mono text-xs glow-box-neon">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3.5 mb-5">
               <div className="flex items-center gap-2 text-zinc-100 font-semibold text-sm">
                 <ShieldCheck size={16} className="text-emerald-400" />
                 <span>{authMode === 'login' ? 'Sign In to AutoTrace' : 'Create AutoTrace Account'}</span>
@@ -642,59 +659,59 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
-                className="text-zinc-400 hover:text-white p-1"
+                className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-zinc-850 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
             {authError && (
-              <div className="mb-4 p-2.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] rounded-lg">
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] rounded-xl font-mono">
                 {authError}
               </div>
             )}
 
-            <form onSubmit={handleAuthSubmit} className="space-y-3">
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
               <div>
-                <label className="block text-zinc-400 mb-1">Username</label>
+                <label className="block text-zinc-400 mb-1.5 font-medium">Username</label>
                 <input
                   type="text"
                   required
                   value={authForm.username}
                   onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400/80 focus:ring-1 focus:ring-emerald-400"
                 />
               </div>
 
               {authMode === 'register' && (
                 <div>
-                  <label className="block text-zinc-400 mb-1">Email Address</label>
+                  <label className="block text-zinc-400 mb-1.5 font-medium">Email Address</label>
                   <input
                     type="email"
                     required
                     value={authForm.email}
                     onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400"
+                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400/80 focus:ring-1 focus:ring-emerald-400"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-zinc-400 mb-1">Password</label>
+                <label className="block text-zinc-400 mb-1.5 font-medium">Password</label>
                 <input
                   type="password"
                   required
                   minLength={8}
                   value={authForm.password}
                   onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:outline-none focus:border-emerald-400/80 focus:ring-1 focus:ring-emerald-400"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={authLoading}
-                className="w-full mt-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-bold py-2.5 rounded-lg transition-all disabled:opacity-50 cursor-pointer shadow-md shadow-emerald-500/20"
+                className="w-full mt-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-bold py-3 rounded-full transition-all duration-200 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-400/40 hover:scale-[1.02] disabled:opacity-50 cursor-pointer"
               >
                 {authLoading
                   ? 'Processing…'
@@ -704,7 +721,7 @@ export default function App() {
               </button>
             </form>
 
-            <div className="mt-4 pt-3 border-t border-zinc-800 text-center text-zinc-400 text-[11px]">
+            <div className="mt-5 pt-3.5 border-t border-zinc-800 text-center text-zinc-400 text-[11px]">
               {authMode === 'login' ? (
                 <span>
                   Don't have an account?{' '}
@@ -714,7 +731,7 @@ export default function App() {
                       setAuthMode('register');
                       setAuthError(null);
                     }}
-                    className="text-emerald-400 hover:underline font-semibold"
+                    className="text-emerald-400 hover:underline font-semibold cursor-pointer"
                   >
                     Register free
                   </button>
@@ -728,7 +745,7 @@ export default function App() {
                       setAuthMode('login');
                       setAuthError(null);
                     }}
-                    className="text-emerald-400 hover:underline font-semibold"
+                    className="text-emerald-400 hover:underline font-semibold cursor-pointer"
                   >
                     Sign In
                   </button>
