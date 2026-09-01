@@ -39,7 +39,7 @@ logger = logging.getLogger("autotrace")
 DEFAULT_ENDPOINT = "https://autotrace-backend.onrender.com/api/ingest/"
 DEFAULT_ENVIRONMENT = "production"
 TIMEOUT_SECONDS = 5.0
-SDK_VERSION = "0.1.1"
+SDK_VERSION = "0.1.2"
 
 SENSITIVE_PATTERNS = re.compile(
     r"(password|secret|token|authorization|api_key|access_token)", re.IGNORECASE
