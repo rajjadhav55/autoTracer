@@ -91,6 +91,38 @@ api.interceptors.request.use((config) => {
 });
 
 /**
+ * Retrieve persistent API key from localStorage, user session, or stable default.
+ */
+export function getPersistentApiKey() {
+  let key = localStorage.getItem('autotrace_api_key');
+  if (!key) {
+    const storedUser = localStorage.getItem('autotrace_user');
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        if (parsed?.api_key) {
+          key = parsed.api_key;
+        }
+      } catch {}
+    }
+  }
+  if (!key) {
+    key = 'autotrace_pk_0d14558fe6e003bc9ff3aa70ac373785ea4163bd';
+    localStorage.setItem('autotrace_api_key', key);
+  }
+  return key;
+}
+
+/**
+ * Save persistent API key to localStorage.
+ */
+export function setPersistentApiKey(newKey) {
+  if (newKey) {
+    localStorage.setItem('autotrace_api_key', newKey);
+  }
+}
+
+/**
  * Register a new user account.
  */
 export async function registerUser({ username, email, password }) {
@@ -98,6 +130,9 @@ export async function registerUser({ username, email, password }) {
   if (data?.tokens?.access) {
     localStorage.setItem('autotrace_token', data.tokens.access);
     localStorage.setItem('autotrace_user', JSON.stringify(data.user));
+    if (data.user?.api_key) {
+      setPersistentApiKey(data.user.api_key);
+    }
   }
   return data;
 }
@@ -119,6 +154,9 @@ export async function loginUser({ username, password }) {
 export async function fetchUserProfile() {
   const { data } = await api.get('/auth/me/');
   localStorage.setItem('autotrace_user', JSON.stringify(data));
+  if (data?.api_key) {
+    setPersistentApiKey(data.api_key);
+  }
   return data;
 }
 
@@ -127,6 +165,17 @@ export async function fetchUserProfile() {
  */
 export async function regenerateApiKey() {
   const { data } = await api.post('/auth/regenerate-key/');
+  if (data?.api_key) {
+    setPersistentApiKey(data.api_key);
+    const storedUser = localStorage.getItem('autotrace_user');
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        parsed.api_key = data.api_key;
+        localStorage.setItem('autotrace_user', JSON.stringify(parsed));
+      } catch {}
+    }
+  }
   return data;
 }
 

@@ -5,6 +5,7 @@ import {
   Zap,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Key,
   Copy,
   Check,
@@ -27,6 +28,8 @@ import {
   registerUser,
   logoutUser,
   regenerateApiKey,
+  getPersistentApiKey,
+  setPersistentApiKey,
   formatErrorMessage,
 } from './services/api';
 
@@ -47,6 +50,7 @@ export default function App() {
     failed: 0,
   });
   const [userProfile, setUserProfile] = useState(null);
+  const [persistentApiKey, setPersistentApiKeyState] = useState(() => getPersistentApiKey());
   const [selectedIncidentId, setSelectedIncidentId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -58,6 +62,11 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState(null);
   const [showKey, setShowKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+
+  // API Key Rotation Confirmation Modal state
+  const [showRotateModal, setShowRotateModal] = useState(false);
+  const [rotateConfirmText, setRotateConfirmText] = useState('');
+  const [rotateLoading, setRotateLoading] = useState(false);
 
   // Auth modal state
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -230,14 +239,40 @@ export default function App() {
     setTimeout(() => setCopiedKey(false), 2000);
   };
 
-  const handleRotateKey = async () => {
+  const openRotateModal = () => {
+    setRotateConfirmText('');
+    setShowRotateModal(true);
+  };
+
+  const handleConfirmRotateKey = async () => {
+    if (rotateConfirmText.trim() !== 'CONFIRM') return;
+    setRotateLoading(true);
     try {
-      const res = await regenerateApiKey();
-      setUserProfile((prev) => ({ ...prev, api_key: res.api_key }));
-      showToast('API key successfully regenerated');
+      if (userProfile) {
+        const res = await regenerateApiKey();
+        setUserProfile((prev) => ({ ...prev, api_key: res.api_key }));
+        setPersistentApiKeyState(res.api_key);
+        setPersistentApiKey(res.api_key);
+        showToast('API key successfully rotated');
+      } else {
+        // Deterministic high-entropy guest key rotation
+        const randomBytes = new Uint8Array(20);
+        crypto.getRandomValues(randomBytes);
+        const randomHex = Array.from(randomBytes)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+        const newGuestKey = `autotrace_pk_${randomHex}`;
+        setPersistentApiKey(newGuestKey);
+        setPersistentApiKeyState(newGuestKey);
+        showToast('API key successfully rotated');
+      }
+      setShowRotateModal(false);
+      setRotateConfirmText('');
     } catch (err) {
       console.error('Failed to rotate API key:', err);
       showToast(formatErrorMessage(err));
+    } finally {
+      setRotateLoading(false);
     }
   };
 
@@ -249,6 +284,9 @@ export default function App() {
       if (authMode === 'register') {
         const res = await registerUser(authForm);
         setUserProfile(res.user);
+        if (res.user?.api_key) {
+          setPersistentApiKeyState(res.user.api_key);
+        }
         showToast(`Account created: Welcome ${res.user.username}`);
       } else {
         await loginUser(authForm);
@@ -300,7 +338,7 @@ export default function App() {
     });
   }, [incidents, statusFilter, searchQuery]);
 
-  const currentApiKey = userProfile?.api_key || 'autotrace_pk_af7ebbe94406c442e299fdf21f9a052a3bc3ad28';
+  const currentApiKey = userProfile?.api_key || persistentApiKey || getPersistentApiKey();
 
   return (
     <div className={`min-h-screen ${currentView === 'landing' ? 'bg-black' : 'bg-zinc-950'} text-zinc-100 font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200`}>
@@ -501,15 +539,14 @@ export default function App() {
                       {copiedKey ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
                       <span>{copiedKey ? 'Copied' : 'Copy Key'}</span>
                     </button>
-                    {userProfile && (
-                      <button
-                        type="button"
-                        onClick={handleRotateKey}
-                        className="text-zinc-500 hover:text-emerald-400 underline text-[11px] ml-1 transition cursor-pointer"
-                      >
-                        Rotate
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={openRotateModal}
+                      className="text-zinc-500 hover:text-emerald-400 underline text-[11px] ml-1 transition cursor-pointer"
+                      title="Rotate API tracking key"
+                    >
+                      Rotate
+                    </button>
                   </div>
                 </div>
 
@@ -751,6 +788,92 @@ export default function App() {
                   </button>
                 </span>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* API Key Rotation Confirmation Modal (Requires typing CONFIRM) */}
+      {showRotateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md border border-rose-500/30 bg-zinc-950/95 p-6 rounded-2xl shadow-2xl font-mono text-xs glow-box-neon relative overflow-hidden">
+            
+            {/* Ambient Danger Glow */}
+            <div className="pointer-events-none absolute -top-20 -right-20 w-40 h-40 bg-rose-500/10 blur-[60px] rounded-full" />
+
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3.5 mb-4">
+              <div className="flex items-center gap-2.5 text-zinc-100 font-semibold text-sm">
+                <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                  <AlertTriangle size={16} />
+                </div>
+                <span className="text-white font-sans font-bold">Rotate Ingestion API Key</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRotateModal(false);
+                  setRotateConfirmText('');
+                }}
+                className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-zinc-850 cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-200 text-xs leading-relaxed space-y-2">
+                <p className="font-semibold text-rose-300 flex items-center gap-1.5">
+                  <span>⚠️ Warning: This action cannot be undone.</span>
+                </p>
+                <p className="text-[11px] text-zinc-300">
+                  Rotating your API key will immediately invalidate the current key. Any active SDKs, backend services, or CI pipelines using this key will fail to ingest telemetry until updated with the new key.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 mb-1 text-[11px]">Current API Key</label>
+                <div className="bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-lg text-zinc-300 font-mono text-xs select-all">
+                  {currentApiKey.slice(0, 20)}••••••••••••••••
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 mb-1.5 font-medium text-xs">
+                  To confirm, please type <span className="text-rose-400 font-bold tracking-wider">CONFIRM</span> below:
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={rotateConfirmText}
+                  onChange={(e) => setRotateConfirmText(e.target.value)}
+                  placeholder="Type CONFIRM"
+                  className="w-full bg-zinc-900 border border-zinc-750 focus:border-rose-500/80 focus:ring-1 focus:ring-rose-500/50 rounded-xl px-3 py-2.5 text-white font-mono text-xs placeholder:text-zinc-600 outline-none transition"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRotateModal(false);
+                    setRotateConfirmText('');
+                  }}
+                  className="px-4 py-2 rounded-full border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-mono transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={rotateConfirmText.trim() !== 'CONFIRM' || rotateLoading}
+                  onClick={handleConfirmRotateKey}
+                  className="px-5 py-2 rounded-full bg-rose-500 hover:bg-rose-400 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:border-zinc-800 text-white font-bold text-xs transition-all shadow-lg shadow-rose-500/20 disabled:shadow-none cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {rotateLoading ? 'Rotating…' : 'Rotate API Key'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
