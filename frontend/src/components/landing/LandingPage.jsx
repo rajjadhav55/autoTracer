@@ -5,7 +5,6 @@ import HeroSection from './HeroSection';
 import BentoGrid from './BentoGrid';
 import CoreFeaturesGrid from './CoreFeaturesGrid';
 import CodePreviewSection from './CodePreviewSection';
-import TestimonialMarquee from './TestimonialMarquee';
 import TerminalCTA from './TerminalCTA';
 import Footer from './Footer';
 
@@ -101,10 +100,7 @@ export default function LandingPage({
         {/* 5. Code Preview Side-by-Side Section */}
         <CodePreviewSection />
 
-        {/* 6. Testimonial Marquee */}
-        <TestimonialMarquee />
-
-        {/* 7. Terminal CTA Box */}
+        {/* 6. Terminal CTA Box */}
         <TerminalCTA
           onStartFree={() => (userProfile ? onOpenConsole() : onOpenAuth('register'))}
           onOpenConsole={onOpenConsole}

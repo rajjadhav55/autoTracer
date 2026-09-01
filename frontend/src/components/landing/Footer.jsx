@@ -22,7 +22,7 @@ export default function Footer({ onOpenConsole }) {
     company: [
       { name: 'About AutoTrace', href: '#' },
       { name: 'Engineering Blog', href: '#' },
-      { name: 'Customers & Stories', href: '#testimonials' },
+      { name: 'Architecture & Engine', href: '#bento' },
       { name: 'Careers (We’re hiring!)', href: '#' },
       { name: 'Security & Compliance', href: '#' },
       { name: 'Contact Sales', href: '#' },

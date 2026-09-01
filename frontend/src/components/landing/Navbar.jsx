@@ -97,10 +97,9 @@ export default function Navbar({ onOpenConsole, onOpenAuth, userProfile, onLogou
                 </AnimatePresence>
               </div>
 
-              <a href="#bento" className="hover:text-white transition-colors">Pricing</a>
+              <a href="#bento" className="hover:text-white transition-colors">Architecture</a>
               <a href="#code-preview" className="hover:text-white transition-colors">Docs</a>
-              <a href="#testimonials" className="hover:text-white transition-colors">Changelog</a>
-              <a href="#testimonials" className="hover:text-white transition-colors">About</a>
+              <a href="#terminal-cta" className="hover:text-white transition-colors">SDKs</a>
               <a href="#terminal-cta" className="hover:text-white transition-colors">Download</a>
             </nav>
           </div>
@@ -199,11 +198,11 @@ export default function Navbar({ onOpenConsole, onOpenAuth, userProfile, onLogou
                 Docs
               </a>
               <a 
-                href="#testimonials" 
+                href="#terminal-cta" 
                 onClick={() => setMobileMenuOpen(false)}
                 className="px-3 py-2 rounded-lg hover:bg-zinc-900 hover:text-white"
               >
-                Changelog
+                SDKs
               </a>
               <a 
                 href="#terminal-cta" 
