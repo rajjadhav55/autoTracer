@@ -39,6 +39,7 @@ logger = logging.getLogger("autotrace")
 DEFAULT_ENDPOINT = "http://localhost:8000/api/ingest/"
 DEFAULT_ENVIRONMENT = "production"
 TIMEOUT_SECONDS = 5.0
+SDK_VERSION = "0.1.1"
 
 SENSITIVE_PATTERNS = re.compile(
     r"(password|secret|token|authorization|api_key|access_token)", re.IGNORECASE
@@ -116,7 +117,7 @@ class AutoTraceClient:
             "Content-Type": "application/json",
             "X-API-Key": self.api_key,
             "X-AutoTrace-Key": self.api_key,
-            "User-Agent": f"autotrace-py/0.1.0 (Python {platform.python_version()})",
+            "User-Agent": f"autotrace-py/{SDK_VERSION} (Python {platform.python_version()})",
         }
 
         # 1. Prefer requests if available
@@ -239,7 +240,7 @@ class AutoTraceClient:
             },
             "sdk": {
                 "name": "autotrace-python",
-                "version": "0.1.0",
+                "version": SDK_VERSION,
             },
         }
 
