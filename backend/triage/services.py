@@ -17,8 +17,11 @@ def execute_chaos_scenario(scenario_name: str):
         # pyrefly: ignore [division-by-zero]
         _ = total_cost / order_count  # Raises ZeroDivisionError
 
-    elif scenario_name == 'timeout':
-        raise TimeoutError("Connection to payment gateway timed out after 30000ms.")
+    elif scenario_name in ('sports_turf', 'sports', 'turf_pricing'):
+        hourly_rate = 1500
+        slot_hours = None  # NoneType
+        # Intentionally triggers TypeError: unsupported operand type(s) for *: 'int' and 'NoneType'
+        _ = hourly_rate * slot_hours
 
     else:
         raise ValueError(f"Unhandled chaos scenario triggered: '{scenario_name}'")
