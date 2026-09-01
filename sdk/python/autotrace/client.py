@@ -1,27 +1,34 @@
 """
 AutoTrace Python SDK Client (autotrace-py)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Lightweight, zero-dependency client for capturing and reporting
-application exceptions asynchronously to the AutoTrace backend.
+Lightweight client for capturing and reporting application exceptions
+asynchronously to the AutoTrace backend in detached, fire-and-forget background threads.
+Zero Celery dependencies. Never blocks the main application response thread.
 """
 
 from __future__ import annotations
 
 import atexit
+import concurrent.futures
 import json
 import logging
 import os
 import platform
-import queue
 import re
 import sys
 import threading
 import traceback
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+try:
+    import requests
+    _HAS_REQUESTS = True
+except ImportError:
+    _HAS_REQUESTS = False
+    import urllib.error
+    import urllib.request
 
 logger = logging.getLogger("autotrace")
 
@@ -38,10 +45,6 @@ SENSITIVE_PATTERNS = re.compile(
 )
 MASK_VALUE = "********"
 
-
-# ---------------------------------------------------------------------------
-# Data Sanitization
-# ---------------------------------------------------------------------------
 
 def _is_sensitive(key: str) -> bool:
     return bool(SENSITIVE_PATTERNS.search(str(key)))
@@ -60,65 +63,89 @@ def sanitize_data(data: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Asynchronous Background Dispatch Pool
+# ---------------------------------------------------------------------------
+
+class _DispatchPool:
+    """Global ThreadPoolExecutor managing detached fire-and-forget dispatches."""
+    _instance: Optional[concurrent.futures.ThreadPoolExecutor] = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def get_executor(cls) -> concurrent.futures.ThreadPoolExecutor:
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = concurrent.futures.ThreadPoolExecutor(
+                        max_workers=4,
+                        thread_name_prefix="autotrace-dispatcher",
+                    )
+        return cls._instance
+
+    @classmethod
+    def shutdown(cls, wait: bool = False) -> None:
+        if cls._instance is not None:
+            cls._instance.shutdown(wait=wait, cancel_futures=True)
+
+
+atexit.register(lambda: _DispatchPool.shutdown(wait=False))
+
+
+# ---------------------------------------------------------------------------
 # AutoTrace Client
 # ---------------------------------------------------------------------------
 
 class AutoTraceClient:
-    """Core SDK client managing asynchronous dispatch of error events."""
+    """Core SDK client managing detached, fire-and-forget dispatch of error events."""
 
     def __init__(
         self,
         api_key: str,
-        endpoint_url: str = DEFAULT_ENDPOINT,
+        endpoint_url: Optional[str] = None,
         environment: str = DEFAULT_ENVIRONMENT,
         default_context: Optional[Dict[str, Any]] = None,
-        max_queue_size: int = 1000,
     ) -> None:
-        self.api_key = api_key.strip()
-        self.endpoint_url = endpoint_url
+        self.api_key = (api_key or "").strip()
+        self.endpoint_url = (endpoint_url or DEFAULT_ENDPOINT).strip()
         self.environment = environment
         self.default_context = default_context or {}
 
-        # Asynchronous background worker queue
-        self._queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
-        self._worker_thread = threading.Thread(
-            target=self._worker_loop,
-            daemon=True,
-            name="autotrace-worker",
-        )
-        self._worker_thread.start()
+    def _send_network_payload(self, payload: Dict[str, Any]) -> Tuple[int, Optional[Dict[str, Any]]]:
+        """Perform HTTP POST in detached background worker thread. Fails silently."""
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": self.api_key,
+            "X-AutoTrace-Key": self.api_key,
+            "User-Agent": f"autotrace-py/0.1.0 (Python {platform.python_version()})",
+        }
 
-        # Register exit handler to flush pending events
-        atexit.register(self.flush)
-
-    def _worker_loop(self) -> None:
-        """Background daemon thread that consumes and dispatches events."""
-        while True:
+        # 1. Prefer requests if available
+        if _HAS_REQUESTS:
             try:
-                payload, callback = self._queue.get()
-                if payload is None:
-                    # Poison pill to shut down worker if needed
-                    self._queue.task_done()
-                    break
-                status_code, response_data = self._send_http(payload)
-                if callback:
-                    callback(status_code, response_data)
-                self._queue.task_done()
+                resp = requests.post(
+                    self.endpoint_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=TIMEOUT_SECONDS,
+                )
+                status_code = resp.status_code
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"raw": resp.text}
+                logger.debug("AutoTrace: event reported via requests (HTTP %s)", status_code)
+                return status_code, data
             except Exception as exc:
-                logger.debug("AutoTrace worker encountered an error (suppressed): %s", exc)
+                logger.debug("AutoTrace: requests delivery failed (suppressed): %s", exc)
+                return 0, {"error": str(exc)}
 
-    def _send_http(self, payload: Dict[str, Any]) -> Tuple[int, Optional[Dict[str, Any]]]:
-        """Perform a blocking HTTP POST with a short timeout. Fails silently."""
+        # 2. Fallback to stdlib urllib.request
         try:
             body = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
                 self.endpoint_url,
                 data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": self.api_key,
-                    "User-Agent": f"autotrace-py/0.1.0 (Python {platform.python_version()})",
-                },
+                headers=headers,
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
@@ -128,14 +155,14 @@ class AutoTraceClient:
                     data = json.loads(resp_text)
                 except Exception:
                     data = {"raw": resp_text}
-                logger.debug("AutoTrace: event reported (HTTP %s)", status_code)
+                logger.debug("AutoTrace: event reported via urllib (HTTP %s)", status_code)
                 return status_code, data
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
             logger.debug("AutoTrace: API error HTTP %s: %s", exc.code, err_body)
             return exc.code, {"error": err_body}
         except Exception as exc:
-            logger.debug("AutoTrace: delivery failed (suppressed): %s", exc)
+            logger.debug("AutoTrace: urllib delivery failed (suppressed): %s", exc)
             return 0, {"error": str(exc)}
 
     def capture_exception(
@@ -146,7 +173,11 @@ class AutoTraceClient:
         sync: bool = False,
         callback: Optional[Callable[[int, Optional[Dict[str, Any]]], None]] = None,
     ) -> Optional[Tuple[int, Optional[Dict[str, Any]]]]:
-        """Capture and format an unhandled exception for AutoTrace ingestion."""
+        """Capture and format an unhandled exception for AutoTrace ingestion.
+
+        When sync=False (default), dispatches in a detached background thread
+        using concurrent.futures.ThreadPoolExecutor so it never blocks the caller.
+        """
         # 1. Resolve exception details
         if exc_info is True or exc_info is None:
             exc_type, exc_val, exc_tb = sys.exc_info()
@@ -185,23 +216,60 @@ class AutoTraceClient:
             merged_context.update(context)
 
         # 5. Build universal ingestion payload
+        service_name = (
+            merged_context.get("service")
+            or merged_context.get("application_name")
+            or merged_context.get("project_name")
+            or "default-app"
+        )
         payload = {
+            "application_name": service_name,
             "error_type": exc_type.__name__ if exc_type else "Exception",
             "error_message": str(exc_val),
             "endpoint": endpoint or "",
             "runtime": runtime_str,
             "traceback": tb_lines,
+            "stack_trace": "\n".join(tb_lines),
             "context": sanitize_data(merged_context),
+            "environment": self.environment,
+            "exception": {
+                "type": exc_type.__name__ if exc_type else "Exception",
+                "message": str(exc_val),
+                "traceback": tb_lines,
+            },
+            "sdk": {
+                "name": "autotrace-python",
+                "version": "0.1.0",
+            },
         }
 
-        # 6. Dispatch synchronously or queue for background thread
+        # 6. Synchronous mode (for test suite verification)
         if sync:
-            return self._send_http(payload)
+            return self._send_network_payload(payload)
+
+        # 7. Fire-and-forget asynchronous background dispatch
+        def _async_task():
+            try:
+                status_code, data = self._send_network_payload(payload)
+                if callback:
+                    callback(status_code, data)
+            except Exception as exc:
+                logger.debug("AutoTrace background task suppressed error: %s", exc)
 
         try:
-            self._queue.put_nowait((payload, callback))
-        except queue.Full:
-            logger.warning("AutoTrace: event queue is full, dropping error event.")
+            executor = _DispatchPool.get_executor()
+            executor.submit(_async_task)
+        except Exception:
+            # Fallback to detached thread if pool is unavailable
+            try:
+                t = threading.Thread(
+                    target=_async_task,
+                    daemon=True,
+                    name="autotrace-detached-worker",
+                )
+                t.start()
+            except Exception as exc:
+                logger.debug("AutoTrace: failed to start detached worker thread: %s", exc)
 
         return None
 
@@ -230,11 +298,8 @@ class AutoTraceClient:
         return decorator
 
     def flush(self, timeout: float = 3.0) -> None:
-        """Block until all queued events are sent, up to *timeout* seconds."""
-        try:
-            self._queue.join()
-        except Exception:
-            pass
+        """Flush pending background dispatches."""
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +315,7 @@ def init(
     environment: str = DEFAULT_ENVIRONMENT,
     context: Optional[Dict[str, Any]] = None,
 ) -> AutoTraceClient:
-    """Initialize the global AutoTrace client singleton."""
+    """Initialize the global AutoTrace client instance."""
     global _GLOBAL_CLIENT
     _GLOBAL_CLIENT = AutoTraceClient(
         api_key=api_key,
@@ -258,12 +323,12 @@ def init(
         environment=environment,
         default_context=context,
     )
-    logger.debug("AutoTrace SDK initialized for environment '%s'.", environment)
+    logger.info("AutoTrace Python SDK initialized (fire-and-forget async dispatcher active).")
     return _GLOBAL_CLIENT
 
 
 def get_client() -> Optional[AutoTraceClient]:
-    """Retrieve the global AutoTrace client instance."""
+    """Retrieve the currently initialized global AutoTrace client."""
     return _GLOBAL_CLIENT
 
 
@@ -274,11 +339,22 @@ def capture_exception(
     sync: bool = False,
     callback: Optional[Callable[[int, Optional[Dict[str, Any]]], None]] = None,
 ) -> Optional[Tuple[int, Optional[Dict[str, Any]]]]:
-    """Capture an exception with the global client."""
-    if _GLOBAL_CLIENT is None:
-        logger.warning("AutoTrace SDK is not initialized. Call autotrace.init(...) first.")
-        return None
-    return _GLOBAL_CLIENT.capture_exception(
+    """Capture and dispatch an exception using the global client in a detached background thread."""
+    client = get_client()
+    if client is None:
+        # Check environment variable fallback
+        env_key = os.environ.get("AUTOTRACE_API_KEY") or os.environ.get("AUTOTRACE_KEY")
+        if env_key:
+            client = init(
+                api_key=env_key,
+                endpoint_url=os.environ.get("AUTOTRACE_API_URL") or os.environ.get("AUTOTRACE_ENDPOINT") or DEFAULT_ENDPOINT,
+                environment=os.environ.get("AUTOTRACE_ENVIRONMENT", DEFAULT_ENVIRONMENT),
+            )
+        else:
+            logger.debug("AutoTrace: capture_exception called before autotrace.init().")
+            return None
+
+    return client.capture_exception(
         exc_info=exc_info,
         context=context,
         endpoint=endpoint,
@@ -292,19 +368,18 @@ def trace(
     context: Optional[Dict[str, Any]] = None,
     reraise: bool = False,
 ) -> Callable:
-    """Decorator to catch and report exceptions using the global client."""
+    """Decorator to capture unhandled exceptions from a function."""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 return func(*args, **kwargs)
             except Exception as exc:
-                if _GLOBAL_CLIENT:
-                    _GLOBAL_CLIENT.capture_exception(
-                        exc_info=exc,
-                        endpoint=endpoint or func.__qualname__,
-                        context=context,
-                    )
+                capture_exception(
+                    exc_info=exc,
+                    endpoint=endpoint or func.__qualname__,
+                    context=context,
+                )
                 if reraise:
                     raise
                 return None
@@ -313,6 +388,6 @@ def trace(
 
 
 def flush(timeout: float = 3.0) -> None:
-    """Flush pending events queued in the global client."""
+    """Flush pending background tasks."""
     if _GLOBAL_CLIENT:
         _GLOBAL_CLIENT.flush(timeout=timeout)

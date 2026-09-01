@@ -2,6 +2,7 @@
 AutoTrace Python SDK (autotrace-py)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Autonomous error tracking and AI-powered incident triage.
+Detached fire-and-forget async background dispatcher.
 """
 
 from autotrace.client import (
@@ -13,6 +14,7 @@ from autotrace.client import (
     sanitize_data,
     trace,
 )
+from autotrace.middleware import AutoTraceMiddleware
 
 __all__ = [
     "init",
@@ -21,6 +23,7 @@ __all__ = [
     "flush",
     "get_client",
     "AutoTraceClient",
+    "AutoTraceMiddleware",
     "sanitize_data",
 ]
 

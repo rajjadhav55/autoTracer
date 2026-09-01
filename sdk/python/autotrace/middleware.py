@@ -1,284 +1,169 @@
 """
 AutoTrace Django Middleware — Client SDK
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 Drop-in Django middleware that captures unhandled exceptions and reports
-them to the AutoTrace ingestion API.
+them to the AutoTrace ingestion API in a detached, non-blocking background thread.
+Zero Celery dependencies. Never delays or blocks Django HTTP response times.
 
 Quick start
 -----------
-1.  ``pip install autotrace``  (or add this package to your requirements)
-
-2.  Add to your Django settings::
+1.  Add to your Django ``settings.py``:
 
         MIDDLEWARE = [
             ...
             'autotrace.middleware.AutoTraceMiddleware',
         ]
 
-        AUTOTRACE_DSN = "https://api.autotrace.io/ingest/"  # default
-        AUTOTRACE_API_KEY = "<your-project-api-key>"
- 
-3.  That's it — unhandled 500s are now reported automatically.
+        AUTOTRACE_API_KEY = "autotrace_pk_..."
+        AUTOTRACE_API_URL = "https://autotrace-backend.onrender.com/api/ingest/"  # optional
+        AUTOTRACE_PROJECT_NAME = "my-django-service"  # optional
+
+2.  That's it — unhandled 500s are captured and reported in detached background threads.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
-import traceback
-from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Dict, Optional
 
-from django.conf import settings
-from django.http import HttpRequest, HttpResponse
-
-try:
-    import urllib.request
-    import urllib.error
-
-    _HAS_URLLIB = True
-except ImportError:  # pragma: no cover — paranoia guard
-    _HAS_URLLIB = False
+from autotrace.client import (
+    DEFAULT_ENDPOINT,
+    DEFAULT_ENVIRONMENT,
+    AutoTraceClient,
+    capture_exception,
+    get_client,
+    init,
+    sanitize_data,
+)
 
 logger = logging.getLogger("autotrace.middleware")
 
-# ---------------------------------------------------------------------------
-# Configuration helpers
-# ---------------------------------------------------------------------------
-
-# Default ingestion endpoint
-_DEFAULT_DSN = "https://api.autotrace.io/ingest/"
-
-# Maximum traceback frames forwarded (keeps payloads focused)
-_MAX_TRACEBACK_FRAMES = 15
-
-# Keys whose *values* will be masked in headers / body payloads.
-# Matching is case-insensitive and checks whether the key *contains* the word.
-_SENSITIVE_PATTERNS: re.Pattern[str] = re.compile(
-    r"(password|secret|token|authorization)", re.IGNORECASE
-)
-
-_MASK = "********"
-
-
-# ---------------------------------------------------------------------------
-# Data scrubbing
-# ---------------------------------------------------------------------------
-
-
-def _is_sensitive_key(key: str) -> bool:
-    """Return ``True`` if *key* looks like it holds a sensitive value."""
-    return bool(_SENSITIVE_PATTERNS.search(key))
-
-
-def _scrub(data: Any) -> Any:
-    """Recursively walk *data* and mask values behind sensitive keys.
-
-    Handles nested dicts and lists.  Everything else passes through
-    unchanged.
-    """
-    if isinstance(data, dict):
-        sanitised: dict[str, Any] = {}
-        for key, value in data.items():
-            if _is_sensitive_key(str(key)):
-                sanitised[key] = _MASK
-            else:
-                sanitised[key] = _scrub(value)
-        return sanitised
-
-    if isinstance(data, (list, tuple)):
-        return [_scrub(item) for item in data]
-
-    return data
-
-
-# ---------------------------------------------------------------------------
-# Request helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_headers(request: HttpRequest) -> dict[str, str]:
-    """Pull HTTP headers from ``request.META``, scrubbing sensitive ones."""
-    headers: dict[str, str] = {}
-    for meta_key, meta_value in request.META.items():
-        if not meta_key.startswith("HTTP_"):
-            continue
-        # Convert META key (e.g. HTTP_ACCEPT_LANGUAGE) → header name
-        header_name = meta_key[5:].replace("_", "-").title()
-        if _is_sensitive_key(header_name):
-            headers[header_name] = _MASK
-        else:
-            headers[header_name] = str(meta_value)
-    return headers
-
-
-def _extract_body(request: HttpRequest) -> dict[str, Any]:
-    """Best-effort parse + scrub of the request body."""
-    try:
-        raw = request.body
-        if not raw:
-            return {}
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception:
-        # Body might be form-encoded, binary, or otherwise unparsable.
-        # Wrap it as a raw string so we still capture *something*.
-        try:
-            payload = {"_raw": request.body.decode("utf-8", errors="replace")}
-        except Exception:
-            return {}
-
-    return _scrub(payload)
-
-
-def _extract_traceback(exc: BaseException) -> list[str]:
-    """Return a compact, relevant traceback as a list of formatted lines.
-
-    We limit output to ``_MAX_TRACEBACK_FRAMES`` innermost frames so that
-    payloads stay small and focused on application code rather than deep
-    framework internals.
-    """
-    tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
-    # ``format_exception`` returns a list of multi-line strings; flatten.
-    flat: list[str] = []
-    for chunk in tb_lines:
-        flat.extend(chunk.splitlines())
-
-    # Keep only the tail (most relevant frames) + the final exception line.
-    if len(flat) > _MAX_TRACEBACK_FRAMES:
-        flat = ["... (truncated)"] + flat[-_MAX_TRACEBACK_FRAMES:]
-
-    return flat
-
-
-# ---------------------------------------------------------------------------
-# Payload construction
-# ---------------------------------------------------------------------------
-
-
-def _build_payload(
-    request: HttpRequest, exception: BaseException
-) -> dict[str, Any]:
-    """Assemble the JSON-serialisable error payload."""
-    return {
-        "exception": {
-            "type": type(exception).__qualname__,
-            "message": str(exception),
-            "traceback": _extract_traceback(exception),
-        },
-        "request": {
-            "method": request.method,
-            "path": request.path,
-            "query_string": request.META.get("QUERY_STRING", ""),
-            "headers": _extract_headers(request),
-            "body": _extract_body(request),
-        },
-        "server": {
-            "server_name": request.META.get("SERVER_NAME", ""),
-            "server_port": request.META.get("SERVER_PORT", ""),
-        },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "sdk": {
-            "name": "autotrace-python",
-            "version": "0.1.0",
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# Transport
-# ---------------------------------------------------------------------------
-
-
-def _send_payload(payload: dict[str, Any], dsn: str, api_key: str) -> None:
-    """POST *payload* to the AutoTrace ingestion endpoint.
-
-    Uses only the stdlib ``urllib`` so we avoid adding ``requests`` as a
-    hard dependency for SDK consumers.
-
-    This function is wrapped in a blanket ``try / except`` at the call
-    site so that transport failures **never** propagate to the host app.
-    """
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        dsn,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-AutoTrace-Key": api_key,
-        },
-        method="POST",
-    )
-    urllib.request.urlopen(req, timeout=5)
-
-
-# ---------------------------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------------------------
-
 
 class AutoTraceMiddleware:
-    """Django middleware that reports unhandled exceptions to AutoTrace.
+    """Django middleware that reports unhandled exceptions to AutoTrace asynchronously."""
 
-    Configuration is read from ``django.conf.settings``:
-
-    ========================  ======================================
-    Setting                   Description
-    ========================  ======================================
-    ``AUTOTRACE_DSN``         Ingestion URL (default: ``https://api.autotrace.io/ingest/``)
-    ``AUTOTRACE_API_KEY``     Project API key (required)
-    ``AUTOTRACE_ENABLED``     Kill-switch — set ``False`` to disable (default: ``True``)
-    ========================  ======================================
-    """
-
-    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+    def __init__(self, get_response: Optional[Callable] = None) -> None:
         self.get_response = get_response
+        self.enabled = True
+        self.api_key = ""
+        self.endpoint_url = DEFAULT_ENDPOINT
+        self.project_name = "django-app"
+        self.environment = DEFAULT_ENVIRONMENT
 
-        # Read configuration once at startup.
-        self.dsn: str = getattr(settings, "AUTOTRACE_DSN", _DEFAULT_DSN)
-        self.api_key: str = getattr(settings, "AUTOTRACE_API_KEY", "")
-        self.enabled: bool = getattr(settings, "AUTOTRACE_ENABLED", True)
+        # Auto-initialize configuration from Django settings
+        try:
+            from django.conf import settings
 
-        if self.enabled and not self.api_key:
-            logger.warning(
-                "AutoTraceMiddleware is enabled but AUTOTRACE_API_KEY is not "
-                "set.  Error reports will be sent without authentication."
+            self.enabled = getattr(settings, "AUTOTRACE_ENABLED", True)
+            self.api_key = (
+                getattr(settings, "AUTOTRACE_API_KEY", "")
+                or getattr(settings, "AUTOTRACE_KEY", "")
+            ).strip()
+
+            self.endpoint_url = (
+                getattr(settings, "AUTOTRACE_API_URL", "")
+                or getattr(settings, "AUTOTRACE_ENDPOINT", "")
+                or getattr(settings, "AUTOTRACE_DSN", "")
+                or DEFAULT_ENDPOINT
+            ).strip()
+
+            self.project_name = (
+                getattr(settings, "AUTOTRACE_PROJECT_NAME", "")
+                or getattr(settings, "AUTOTRACE_SERVICE", "")
+                or "django-app"
             )
 
-    # -- Django middleware interface ------------------------------------------
+            self.environment = getattr(
+                settings, "AUTOTRACE_ENVIRONMENT", DEFAULT_ENVIRONMENT
+            )
 
-    def __call__(self, request: HttpRequest) -> HttpResponse:
-        """Wrap the downstream middleware / view chain."""
-        try:
-            response = self.get_response(request)
+            if self.enabled and self.api_key and get_client() is None:
+                init(
+                    api_key=self.api_key,
+                    endpoint_url=self.endpoint_url,
+                    environment=self.environment,
+                    context={"service": self.project_name},
+                )
+            elif self.enabled and not self.api_key:
+                logger.warning(
+                    "AutoTraceMiddleware is active but AUTOTRACE_API_KEY is not configured in settings."
+                )
         except Exception as exc:
-            # Capture → report → re-raise so Django's error handling
-            # (DEBUG page, logging, etc.) still works normally.
-            self._report(request, exc)
+            logger.debug("AutoTrace: settings initialization skipped: %s", exc)
+
+    def __call__(self, request: Any) -> Any:
+        """Process the request and catch any unhandled exceptions."""
+        try:
+            response = self.get_response(request) if self.get_response else None
+            return response
+        except Exception as exc:
+            self.process_exception(request, exc)
             raise
 
-        return response
-
-    # -- Internal helpers ----------------------------------------------------
-
-    def _report(self, request: HttpRequest, exception: BaseException) -> None:
-        """Build and ship the error payload — silently swallowing any errors
-        that occur during reporting so we never break the host application.
-        """
+    def process_exception(self, request: Any, exception: BaseException) -> None:
+        """Capture request telemetry and dispatch error event in a detached background thread."""
         if not self.enabled:
             return
 
         try:
-            payload = _build_payload(request, exception)
-            _send_payload(payload, self.dsn, self.api_key)
-            logger.debug("AutoTrace: error reported successfully.")
-        except Exception:
-            # ----- FAIL SILENTLY -----
-            # If AutoTrace's servers are unreachable, misconfigured, or the
-            # payload can't be serialised, we absolutely must not let that
-            # crash the client's application a *second* time.
-            logger.debug(
-                "AutoTrace: failed to report error (suppressed).",
-                exc_info=True,
+            # 1. Extract and sanitize HTTP headers from request.META
+            headers: Dict[str, str] = {}
+            meta = getattr(request, "META", {})
+            for key, value in meta.items():
+                if key.startswith("HTTP_"):
+                    header_name = key[5:].replace("_", "-").title()
+                    headers[header_name] = str(value)
+                elif key in ("CONTENT_TYPE", "CONTENT_LENGTH", "REMOTE_ADDR"):
+                    headers[key.replace("_", "-").title()] = str(value)
+
+            # 2. Extract query parameters
+            query_params: Dict[str, Any] = {}
+            get_params = getattr(request, "GET", None)
+            if get_params:
+                try:
+                    query_params = dict(get_params.items())
+                except Exception:
+                    pass
+
+            # 3. Best-effort parse body payload
+            body_data: Any = None
+            raw_body = getattr(request, "body", None)
+            if raw_body:
+                try:
+                    body_data = json.loads(raw_body.decode("utf-8", errors="replace"))
+                except Exception:
+                    try:
+                        body_data = raw_body.decode("utf-8", errors="replace")[:1000]
+                    except Exception:
+                        body_data = "<binary data>"
+
+            # 4. Resolve authenticated user identifier
+            user_repr = "anonymous"
+            req_user = getattr(request, "user", None)
+            if req_user and getattr(req_user, "is_authenticated", False):
+                user_repr = getattr(req_user, "username", str(req_user))
+
+            # 5. Assemble context dict
+            context: Dict[str, Any] = {
+                "service": self.project_name,
+                "environment": self.environment,
+                "method": getattr(request, "method", "UNKNOWN"),
+                "path": getattr(request, "path", ""),
+                "query_params": sanitize_data(query_params),
+                "headers": sanitize_data(headers),
+                "body": sanitize_data(body_data),
+                "user": user_repr,
+            }
+
+            # 6. Dispatch in detached background thread (fire-and-forget)
+            capture_exception(
+                exc_info=exception,
+                endpoint=getattr(request, "path", ""),
+                context=context,
+                sync=False,
             )
+            logger.debug("AutoTrace: exception dispatched in background thread.")
+        except Exception as exc:
+            # Silently swallow any SDK internal error so host application NEVER crashes
+            logger.debug("AutoTrace: failed to capture exception (suppressed): %s", exc)
