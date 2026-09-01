@@ -16,8 +16,8 @@ const nodeSdkDir = fs.existsSync(path.join(__dirname, 'node'))
 const autotrace = require(nodeSdkDir);
 
 
-const API_KEY = 'autotrace_pk_af7ebbe94406c442e299fdf21f9a052a3bc3ad28';
-const ENDPOINT = 'http://localhost:8000/api/ingest/';
+const API_KEY = process.env.AUTOTRACE_API_KEY || 'autotrace_pk_0d14558fe6e003bc9ff3aa70ac373785ea4163bd';
+const ENDPOINT = process.env.AUTOTRACE_ENDPOINT || 'https://autotrace-backend.onrender.com/api/ingest/';
 
 async function main() {
   console.log('==================================================');

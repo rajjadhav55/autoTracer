@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Normalize API Base URL (handles missing /api and trailing slashes)
 function resolveApiBaseUrl() {
-  let raw = (import.meta?.env?.VITE_API_URL || 'http://localhost:8000/api').trim();
+  let raw = (import.meta?.env?.VITE_API_URL || 'https://autotrace-backend.onrender.com/api').trim();
   raw = raw.replace(/\/+$/, '');
   if (!raw.endsWith('/api')) {
     raw = `${raw}/api`;

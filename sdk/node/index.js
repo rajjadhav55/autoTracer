@@ -9,7 +9,7 @@
 
 const os = require('os');
 
-const DEFAULT_ENDPOINT = 'http://localhost:8000/api/ingest/';
+const DEFAULT_ENDPOINT = 'https://autotrace-backend.onrender.com/api/ingest/';
 const DEFAULT_ENVIRONMENT = 'production';
 const TIMEOUT_MS = 5000;
 

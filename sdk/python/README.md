@@ -18,7 +18,7 @@ import autotrace
 # 1. Initialize once at application startup
 autotrace.init(
     api_key="<YOUR_API_KEY>",
-    endpoint_url="http://localhost:8000/api/ingest/",
+    endpoint_url="https://autotrace-backend.onrender.com/api/ingest/",
     environment="production",
     context={"service": "payment-api", "version": "2.1.0"},
 )
@@ -50,11 +50,11 @@ def sync_inventory():
 In your `settings.py`:
 ```python
 AUTOTRACE_API_KEY = "<YOUR_API_KEY>"
-AUTOTRACE_ENDPOINT = "http://localhost:8000/api/ingest/"
+AUTOTRACE_API_URL = "https://autotrace-backend.onrender.com/api/ingest/"
 
 MIDDLEWARE = [
     # ... other middleware
-    "autotrace.integrations.django.AutoTraceMiddleware",
+    "autotrace.middleware.AutoTraceMiddleware",
 ]
 ```
 

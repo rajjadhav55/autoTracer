@@ -18,7 +18,7 @@ const autotrace = require('autotrace-node');
 // 1. Initialize once at startup
 autotrace.init({
   apiKey: '<YOUR_API_KEY>',
-  endpointUrl: 'http://localhost:8000/api/ingest/',
+  endpointUrl: 'https://autotrace-backend.onrender.com/api/ingest/',
   environment: 'production',
   context: { service: 'api-gateway', version: '1.0.0' },
 });

@@ -36,7 +36,7 @@ logger = logging.getLogger("autotrace")
 # Constants & Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_ENDPOINT = "http://localhost:8000/api/ingest/"
+DEFAULT_ENDPOINT = "https://autotrace-backend.onrender.com/api/ingest/"
 DEFAULT_ENVIRONMENT = "production"
 TIMEOUT_SECONDS = 5.0
 SDK_VERSION = "0.1.1"

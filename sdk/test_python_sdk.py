@@ -20,8 +20,8 @@ if SDK_PATH not in sys.path:
 
 import autotrace
 
-API_KEY = "autotrace_pk_0d14558fe6e003bc9ff3aa70ac373785ea4163bd"
-ENDPOINT = "http://localhost:8000/api/ingest/"
+API_KEY = os.environ.get("AUTOTRACE_API_KEY", "autotrace_pk_0d14558fe6e003bc9ff3aa70ac373785ea4163bd")
+ENDPOINT = os.environ.get("AUTOTRACE_ENDPOINT", "https://autotrace-backend.onrender.com/api/ingest/")
 
 
 def main():
