@@ -61,12 +61,21 @@ class AutoTraceMiddleware:
                 or getattr(settings, "AUTOTRACE_KEY", "")
             ).strip()
 
-            self.endpoint_url = (
+            raw_endpoint = (
                 getattr(settings, "AUTOTRACE_API_URL", "")
                 or getattr(settings, "AUTOTRACE_ENDPOINT", "")
                 or getattr(settings, "AUTOTRACE_DSN", "")
                 or DEFAULT_ENDPOINT
             ).strip()
+
+            if raw_endpoint.endswith("/api/errors/") or raw_endpoint.endswith("/api/errors"):
+                raw_endpoint = raw_endpoint.rstrip("/").replace("/api/errors", "/api/ingest/")
+            elif raw_endpoint.endswith("/api/") or raw_endpoint.endswith("/api"):
+                raw_endpoint = raw_endpoint.rstrip("/") + "/ingest/"
+            elif not raw_endpoint.endswith("/"):
+                raw_endpoint = f"{raw_endpoint}/"
+
+            self.endpoint_url = raw_endpoint
 
             self.project_name = (
                 getattr(settings, "AUTOTRACE_PROJECT_NAME", "")

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: autotrace-py
-Version: 0.1.2
+Version: 0.1.3
 Summary: AutoTrace Python SDK for autonomous error tracking and AI triage
 Author-email: AutoTrace Team <maintainers@autotrace.io>
 License: MIT

@@ -218,11 +218,20 @@ ingest_error_event = UniversalIngestView.as_view()
 
 class IncidentListView(generics.ListAPIView):
     """
-    Return a list of errors/incidents with status counts.
-    Route: GET /api/incidents/ or GET /api/errors/
+    Return a list of errors/incidents with status counts (GET),
+    or ingest error telemetry payloads from client SDKs (POST).
+    Route: GET/POST /api/incidents/ or GET/POST /api/errors/
     """
     serializer_class = IncidentListSerializer
     permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        """
+        Support POST on /api/errors/ and /api/incidents/ by delegating directly to UniversalIngestView.
+        Eliminates HTTP 405 Method Not Allowed errors when SDKs or integrations send payloads to /api/errors/.
+        """
+        ingest_view = UniversalIngestView.as_view()
+        return ingest_view(request._request, *args, **kwargs)
 
     def get_queryset(self):
         qs = Incident.objects.all().order_by("-created_at")

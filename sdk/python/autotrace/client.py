@@ -39,7 +39,7 @@ logger = logging.getLogger("autotrace")
 DEFAULT_ENDPOINT = "https://autotrace-backend.onrender.com/api/ingest/"
 DEFAULT_ENVIRONMENT = "production"
 TIMEOUT_SECONDS = 5.0
-SDK_VERSION = "0.1.1"
+SDK_VERSION = "0.1.3"
 
 SENSITIVE_PATTERNS = re.compile(
     r"(password|secret|token|authorization|api_key|access_token)", re.IGNORECASE
@@ -107,7 +107,22 @@ class AutoTraceClient:
         default_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.api_key = (api_key or "").strip()
-        self.endpoint_url = (endpoint_url or DEFAULT_ENDPOINT).strip()
+        raw_endpoint = (
+            endpoint_url
+            or os.environ.get("AUTOTRACE_API_URL")
+            or os.environ.get("AUTOTRACE_ENDPOINT")
+            or DEFAULT_ENDPOINT
+        ).strip()
+
+        # Normalize endpoint URL to canonical ingest route
+        if raw_endpoint.endswith("/api/errors/") or raw_endpoint.endswith("/api/errors"):
+            raw_endpoint = raw_endpoint.rstrip("/").replace("/api/errors", "/api/ingest/")
+        elif raw_endpoint.endswith("/api/") or raw_endpoint.endswith("/api"):
+            raw_endpoint = raw_endpoint.rstrip("/") + "/ingest/"
+        elif not raw_endpoint.endswith("/"):
+            raw_endpoint = f"{raw_endpoint}/"
+
+        self.endpoint_url = raw_endpoint
         self.environment = environment
         self.default_context = default_context or {}
 
