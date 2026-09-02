@@ -10,6 +10,7 @@ from .views import (
     IncidentListView,
     RegenerateAPIKeyView,
     RegisterView,
+    SportsCategoryView,
     UniversalIngestView,
     UserProfileView,
 )
@@ -25,6 +26,10 @@ urlpatterns = [
     # ── Universal SDK Error Ingestion ──────────────────────────────
     path('ingest/', UniversalIngestView.as_view(), name='universal-ingest'),
     path('errors/ingest/', UniversalIngestView.as_view(), name='error-ingest'),
+
+    # ── Sports & Turfs Telemetry Exception Trigger ─────────────────
+    path('sports/', SportsCategoryView.as_view(), name='sports-category'),
+    path('sports/turfs/', SportsCategoryView.as_view(), name='sports-turfs'),
 
     # ── User Dashboard & Telemetry Stream ──────────────────────────
     path('errors/', IncidentListView.as_view(), name='error-list'),

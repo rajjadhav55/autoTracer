@@ -322,3 +322,33 @@ class ChaosTriggerView(APIView):
         scenario = request.query_params.get("scenario", "zero_division")
         execute_chaos_scenario(scenario)
         return Response({"status": "Success", "message": f"Scenario {scenario} triggered."})
+
+
+# ---------------------------------------------------------------------------
+# Sports & Turfs Telemetry Crash Endpoint (AllowAny permission)
+# ---------------------------------------------------------------------------
+
+class SportsCategoryView(APIView):
+    """
+    Handles sports category and turfs listing.
+    Route: GET/POST /api/sports/ or /api/sports/turfs/ or /sports/
+    
+    AllowAny permission ensures it never returns a 401 Unauthorized response,
+    forcing an intentional unhandled runtime exception to test AutoTrace telemetry.
+    """
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request, *args, **kwargs):
+        category = request.query_params.get("category", "football")
+        turf_id = request.query_params.get("turf_id", "turf_001")
+        # Force an intentional unhandled runtime exception (ValueError) instead of returning 401
+        raise ValueError(
+            f"Simulated AutoTrace Telemetry Crash: Failed to load '{category}' catalog for turf '{turf_id}' due to unhandled database connection timeout."
+        )
+
+    def post(self, request, *args, **kwargs):
+        # Force an intentional unhandled runtime exception on sports booking submission
+        raise ValueError(
+            "Simulated AutoTrace Telemetry Crash: Unhandled database integrity error during sports turf booking transaction."
+        )
