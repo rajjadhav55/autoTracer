@@ -3,7 +3,7 @@ import traceback
 from django.utils.deprecation import MiddlewareMixin
 from .models import Incident
 # pyrefly: ignore [missing-import]
-from .tasks import process_incident_task
+from .tasks import process_incident_task, run_ai_triage_sync
 
 SENSITIVE_KEYS = {'password', 'token', 'secret', 'authorization', 'api_key', 'access_token'}
 
@@ -60,8 +60,11 @@ class ExceptionCaptureMiddleware(MiddlewareMixin):
             status='PENDING'
         )
 
-        # 5. Dispatch async analysis to Celery worker (non-blocking)
-        process_incident_task.delay(str(incident.id))
+        # 5. Dispatch async analysis to Celery worker with synchronous fallback
+        try:
+            process_incident_task.delay(str(incident.id))
+        except Exception:
+            run_ai_triage_sync(str(incident.id))
 
         # Returning None allows standard Django error handling to continue
         return None

@@ -8,7 +8,7 @@ from celery import shared_task
 # pyrefly: ignore [missing-import]
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from .models import Incident
+from .models import ErrorLog, Incident
 
 logger = logging.getLogger(__name__)
 
@@ -167,15 +167,14 @@ def _heuristic_triage(incident: "Incident") -> dict:
         }
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=5)
-def analyze_incident_with_ai(self, incident_id):
-    """Perform AI-powered triage on an Incident.
+def run_ai_triage_sync(incident_id):
+    """Perform AI-powered triage synchronously on an Incident.
 
     1. Fetch the Incident and set status → ANALYZING.
     2. Build a prompt from the crash data (type, message, traceback, runtime, context).
     3. Call Google Gemini via LangChain for root-cause analysis (or heuristic fallback).
     4. Parse the LLM response and save root_cause + suggested_fix.
-    5. Set status → TRIAGED.
+    5. Set status → TRIAGED and sync ErrorLog.
     """
     try:
         incident = Incident.objects.get(id=incident_id)
@@ -186,6 +185,7 @@ def analyze_incident_with_ai(self, incident_id):
     # ── Mark as ANALYZING ───────────────────────────────────────────────
     incident.status = "ANALYZING"
     incident.save(update_fields=["status"])
+    ErrorLog.objects.filter(id=incident.id).update(status="ANALYZING")
     logger.info(
         "[AutoTrace] Picked up Incident %s (%s, runtime=%s) for triage.",
         incident.id, incident.error_type, incident.runtime,
@@ -234,6 +234,7 @@ def analyze_incident_with_ai(self, incident_id):
         incident.save(update_fields=[
             "root_cause", "suggested_fix", "diagnostic_logs", "status",
         ])
+        ErrorLog.objects.filter(id=incident.id).update(status="TRIAGED")
 
         logger.info("[AutoTrace] Finished triage for Incident %s in %ss using %s.", incident.id, ai_duration, model_name)
         return {"status": "success", "incident_id": str(incident.id), "duration_seconds": ai_duration}
@@ -253,11 +254,19 @@ def analyze_incident_with_ai(self, incident_id):
         }
         incident.status = "TRIAGED"
         incident.save(update_fields=["root_cause", "suggested_fix", "diagnostic_logs", "status"])
+        ErrorLog.objects.filter(id=incident.id).update(status="TRIAGED")
         return {"status": "success", "incident_id": str(incident_id), "engine": "fallback"}
 
 
-# Alias for backward-compatibility
+@shared_task(bind=True, max_retries=3, default_retry_delay=5)
+def analyze_incident_with_ai(self, incident_id):
+    """Celery task wrapper for AI-powered triage."""
+    return run_ai_triage_sync(incident_id)
+
+
+# Aliases for backward-compatibility & external task naming conventions
 process_incident_task = analyze_incident_with_ai
+run_ai_triage_task = analyze_incident_with_ai
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
@@ -289,8 +298,11 @@ def process_error_payload(self, incident_id, metadata):
             incident.id,
         )
 
-        # Chain into the existing triage task
-        process_incident_task.delay(str(incident.id))
+        # Chain into the existing triage task with fallback to synchronous execution
+        try:
+            process_incident_task.delay(str(incident.id))
+        except Exception:
+            run_ai_triage_sync(str(incident.id))
 
     except Incident.DoesNotExist:
         logger.error("[AutoTrace] Incident %s not found.", incident_id)

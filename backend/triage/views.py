@@ -19,7 +19,23 @@ from .serializers import (
     UserSerializer,
 )
 from .services import execute_chaos_scenario
-from .tasks import analyze_incident_with_ai
+from .tasks import (
+    analyze_incident_with_ai,
+    process_incident_task,
+    run_ai_triage_sync,
+    run_ai_triage_task,
+)
+
+try:
+    from kombu.exceptions import OperationalError as KombuOperationalError
+except ImportError:
+    KombuOperationalError = Exception
+
+try:
+    from redis.exceptions import ConnectionError as RedisConnectionError, RedisError
+except ImportError:
+    RedisConnectionError = Exception
+    RedisError = Exception
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -182,11 +198,24 @@ class UniversalIngestView(APIView):
             status="PENDING",
         )
 
-        # 5. Dispatch async Celery AI triage task
+        # 5. Dispatch async Celery AI triage task with fallback to synchronous execution
         try:
-            analyze_incident_with_ai.delay(str(incident.id))
+            run_ai_triage_task.delay(str(incident.id))
+            logger.info("[AutoTrace] Queued Celery AI triage task for Incident %s.", incident.id)
+        except (RedisConnectionError, RedisError, KombuOperationalError, ConnectionRefusedError, OSError) as redis_exc:
+            logger.warning(
+                "[AutoTrace] Redis broker unavailable (%s). Falling back to synchronous triage for Incident %s.",
+                redis_exc,
+                incident.id,
+            )
+            run_ai_triage_sync(str(incident.id))
         except Exception as exc:
-            logger.warning("[AutoTrace] Failed to dispatch Celery AI triage task: %s", exc)
+            logger.warning(
+                "[AutoTrace] Failed to queue Celery triage task (%s). Executing triage synchronously for Incident %s.",
+                exc,
+                incident.id,
+            )
+            run_ai_triage_sync(str(incident.id))
 
         logger.info(
             "[AutoTrace] Ingested error %s (%s, runtime=%s) for user '%s'.",
@@ -196,13 +225,21 @@ class UniversalIngestView(APIView):
             user.username,
         )
 
+        incident.refresh_from_db(fields=["status"])
+        msg = (
+            "Incident ingested and triaged successfully."
+            if incident.status == "TRIAGED"
+            else "Incident ingested and queued for AI analysis."
+        )
+
         return Response(
             {
                 "status": "success",
                 "id": str(error_log.id),
                 "incident_id": str(incident.id),
+                "incident_status": incident.status,
                 "project": project.name if project else app_name,
-                "message": "Incident ingested and queued for AI analysis.",
+                "message": msg,
             },
             status=status.HTTP_201_CREATED,
         )
