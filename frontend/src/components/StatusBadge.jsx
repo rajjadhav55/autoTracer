@@ -11,8 +11,8 @@ const STATUS_MAP = {
   },
   TRIAGED: {
     label: 'AI TRIAGED',
-    dotClass: 'bg-emerald-400 shadow-sm shadow-emerald-400/50',
-    badgeClass: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-sm shadow-emerald-500/15',
+    dotClass: 'bg-emerald-400 shadow-[0_0_8px_#34d399]',
+    badgeClass: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)] font-semibold',
   },
   FAILED: {
     label: 'FAILED',
@@ -22,7 +22,7 @@ const STATUS_MAP = {
   RESOLVED: {
     label: 'RESOLVED',
     dotClass: 'bg-zinc-400',
-    badgeClass: 'border-zinc-700/80 bg-zinc-850/80 text-zinc-300',
+    badgeClass: 'border-zinc-700/80 bg-zinc-800/80 text-zinc-300',
   },
 };
 
@@ -31,7 +31,7 @@ export default function StatusBadge({ status }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider uppercase transition-colors ${meta.badgeClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] tracking-wider uppercase transition-all duration-200 backdrop-blur-md ${meta.badgeClass}`}
     >
       <span
         aria-hidden="true"
@@ -41,3 +41,4 @@ export default function StatusBadge({ status }) {
     </span>
   );
 }
+
