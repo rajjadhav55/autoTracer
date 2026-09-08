@@ -349,6 +349,14 @@ export default function App() {
 
   const currentApiKey = userProfile?.api_key || persistentApiKey || getPersistentApiKey();
 
+  // Show first half of the API key, turn the second half into *** when masked
+  const displayApiKey = useMemo(() => {
+    if (!currentApiKey) return 'autotrace_pk_***';
+    if (showKey) return currentApiKey;
+    const halfLength = Math.ceil(currentApiKey.length / 2);
+    return `${currentApiKey.slice(0, halfLength)}***`;
+  }, [currentApiKey, showKey]);
+
   const sdkSnippets = useMemo(() => ({
     python: `# 1. Install AutoTrace
 pip install autotrace
@@ -357,7 +365,7 @@ pip install autotrace
 import autotrace
 
 autotrace.init(
-    api_key="${currentApiKey}",
+    api_key="${displayApiKey}",
     environment="production",
     enable_ai_triage=True
 )`,
@@ -367,7 +375,7 @@ import autotrace
 from autotrace.integrations.fastapi import AutoTraceMiddleware
 
 app = FastAPI(title="Payment Service")
-autotrace.init(api_key="${currentApiKey}")
+autotrace.init(api_key="${displayApiKey}")
 app.add_middleware(AutoTraceMiddleware)`,
     django: `# In settings.py
 MIDDLEWARE = [
@@ -376,7 +384,7 @@ MIDDLEWARE = [
 ]
 
 AUTOTRACE_CONFIG = {
-    'API_KEY': '${currentApiKey}',
+    'API_KEY': '${displayApiKey}',
     'ENVIRONMENT': 'production',
 }`,
     react: `// In index.jsx / App.jsx
@@ -384,14 +392,14 @@ import { AutoTraceProvider } from '@autotrace/react';
 
 export default function Root() {
   return (
-    <AutoTraceProvider apiKey="${currentApiKey}">
+    <AutoTraceProvider apiKey="${displayApiKey}">
       <App />
     </AutoTraceProvider>
   );
 }`,
     curl: `# Direct HTTP Telemetry Ingestion
 curl -X POST https://autotrace-backend.onrender.com/api/ingest/ \\
-  -H "X-API-Key: ${currentApiKey}" \\
+  -H "X-API-Key: ${displayApiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "error_type": "ZeroDivisionError",
@@ -399,11 +407,13 @@ curl -X POST https://autotrace-backend.onrender.com/api/ingest/ \\
     "application_name": "checkout-service",
     "endpoint": "/api/v1/pricing"
   }'`
-  }), [currentApiKey]);
+  }), [displayApiKey]);
 
   const copySdkSnippet = (snippet) => {
     if (!snippet) return;
-    navigator.clipboard.writeText(snippet);
+    // Always inject the full API key into the copied snippet so it works immediately when pasted
+    const fullSnippet = snippet.replaceAll(displayApiKey, currentApiKey);
+    navigator.clipboard.writeText(fullSnippet);
     setSdkCopied(true);
     showToast('SDK snippet copied to clipboard');
     setTimeout(() => setSdkCopied(false), 2000);
@@ -659,7 +669,7 @@ curl -X POST https://autotrace-backend.onrender.com/api/ingest/ \\
                   <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex-1 min-w-[220px] bg-zinc-950 border border-zinc-800 px-3.5 py-2 rounded-xl text-zinc-200 select-all font-mono text-xs shadow-inner flex items-center justify-between">
                       <span className="truncate">
-                        {showKey ? currentApiKey : `${currentApiKey.slice(0, 18)}••••••••••••••••`}
+                        {displayApiKey}
                       </span>
                       <button
                         type="button"
@@ -1021,7 +1031,7 @@ curl -X POST https://autotrace-backend.onrender.com/api/ingest/ \\
               <div>
                 <label className="block text-zinc-400 mb-1 text-[11px]">Current API Key</label>
                 <div className="bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-lg text-zinc-300 font-mono text-xs select-all">
-                  {currentApiKey.slice(0, 20)}••••••••••••••••
+                  {displayApiKey}
                 </div>
               </div>
 
