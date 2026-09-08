@@ -11,6 +11,7 @@ from __future__ import annotations
 import atexit
 import concurrent.futures
 import json
+import linecache
 import logging
 import os
 import platform
@@ -39,12 +40,21 @@ logger = logging.getLogger("autotrace")
 DEFAULT_ENDPOINT = "https://autotrace-backend.onrender.com/api/ingest/"
 DEFAULT_ENVIRONMENT = "production"
 TIMEOUT_SECONDS = 5.0
-SDK_VERSION = "0.1.3"
+SDK_VERSION = "0.1.4"
 
 SENSITIVE_PATTERNS = re.compile(
     r"(password|secret|token|authorization|api_key|access_token)", re.IGNORECASE
 )
 MASK_VALUE = "********"
+IGNORED_FRAME_VARS = {
+    "__builtins__",
+    "__loader__",
+    "__spec__",
+    "__doc__",
+    "__file__",
+    "__cached__",
+    "__package__",
+}
 
 
 def _is_sensitive(key: str) -> bool:
@@ -61,6 +71,59 @@ def sanitize_data(data: Any) -> Any:
     elif isinstance(data, (list, tuple)):
         return [sanitize_data(item) for item in data]
     return data
+
+
+def _safe_serialize_val(val: Any, depth: int = 2) -> Any:
+    """Safely convert frame local values to JSON-serializable structures."""
+    if val is None or isinstance(val, (int, float, bool)):
+        return val
+    if isinstance(val, str):
+        return val if len(val) <= 500 else val[:497] + "..."
+    if depth <= 0:
+        try:
+            s = repr(val)
+            return s if len(s) <= 200 else s[:197] + "..."
+        except Exception:
+            return f"<{type(val).__name__}>"
+    if isinstance(val, dict):
+        res = {}
+        for k, v in list(val.items())[:20]:
+            str_k = str(k)
+            if _is_sensitive(str_k):
+                res[str_k] = MASK_VALUE
+            else:
+                res[str_k] = _safe_serialize_val(v, depth - 1)
+        return res
+    if isinstance(val, (list, tuple, set)):
+        res = []
+        for item in list(val)[:20]:
+            res.append(_safe_serialize_val(item, depth - 1))
+        return res
+    try:
+        s = repr(val)
+        return s if len(s) <= 300 else s[:297] + "..."
+    except Exception:
+        return f"<{type(val).__name__} instance>"
+
+
+def _extract_frame_locals(frame: Any) -> Dict[str, Any]:
+    """Safely extract and sanitize local variables from a stack frame."""
+    raw_locals = getattr(frame, "f_locals", {})
+    if not isinstance(raw_locals, dict):
+        return {}
+
+    extracted = {}
+    for var_name, val in list(raw_locals.items())[:30]:
+        if var_name in IGNORED_FRAME_VARS:
+            continue
+        if _is_sensitive(var_name):
+            extracted[var_name] = MASK_VALUE
+        else:
+            try:
+                extracted[var_name] = _safe_serialize_val(val)
+            except Exception:
+                extracted[var_name] = "<unserializable>"
+    return sanitize_data(extracted)
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +271,7 @@ class AutoTraceClient:
             logger.debug("AutoTrace: capture_exception called with no active exception.")
             return None
 
-        # 2. Format traceback array
+        # 2. Format traceback array and extract rich frame context (source lines & f_locals)
         tb_lines: List[str] = []
         try:
             raw_lines = traceback.format_exception(exc_type, exc_val, exc_tb)
@@ -216,6 +279,31 @@ class AutoTraceClient:
                 tb_lines.extend(chunk.splitlines())
         except Exception:
             tb_lines = [f"{exc_type}: {exc_val}"]
+
+        frames: List[Dict[str, Any]] = []
+        if exc_tb is not None:
+            try:
+                for frame, lineno in traceback.walk_tb(exc_tb):
+                    filename = frame.f_code.co_filename
+                    func_name = frame.f_code.co_name
+                    source_line = linecache.getline(filename, lineno).strip()
+                    frame_locals = _extract_frame_locals(frame)
+
+                    frames.append({
+                        "filename": filename,
+                        "lineno": lineno,
+                        "function": func_name,
+                        "code": source_line,
+                        "source_line": source_line,
+                        "locals": frame_locals,
+                    })
+            except Exception as f_err:
+                logger.debug("AutoTrace: failed extracting frame context: %s", f_err)
+
+        source_context = {
+            "frames": frames,
+            "total_frames": len(frames),
+        }
 
         # 3. Assemble runtime metadata
         runtime_str = f"python {platform.python_version()}"
@@ -227,6 +315,8 @@ class AutoTraceClient:
             "os": f"{platform.system()} {platform.release()}",
             "architecture": platform.machine(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "frames": frames,
+            "source_context": source_context,
         }
         if context:
             merged_context.update(context)
@@ -246,12 +336,16 @@ class AutoTraceClient:
             "runtime": runtime_str,
             "traceback": tb_lines,
             "stack_trace": "\n".join(tb_lines),
+            "frames": frames,
+            "source_context": source_context,
             "context": sanitize_data(merged_context),
             "environment": self.environment,
             "exception": {
                 "type": exc_type.__name__ if exc_type else "Exception",
                 "message": str(exc_val),
                 "traceback": tb_lines,
+                "frames": frames,
+                "source_context": source_context,
             },
             "sdk": {
                 "name": "autotrace-python",
