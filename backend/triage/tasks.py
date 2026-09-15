@@ -1,7 +1,10 @@
 import json
 import logging
 import os
+import threading
 import time
+import urllib.parse
+import requests
 
 # pyrefly: ignore [missing-import]
 from celery import shared_task
@@ -26,13 +29,15 @@ stack trace, HTTP endpoint, and request metadata.
 Analyse the crash and respond in **exactly** this JSON format (no markdown fences):
 {
   "root_cause": "<A concise 2-4 sentence explanation of why this crash happened.>",
-  "suggested_fix": "<A concrete code-level fix or remediation step the developer should take.>"
+  "suggested_fix": "<A concrete code-level fix or remediation step the developer should take.>",
+  "unified_diff": "<A unified git diff patch to fix the bug in the affected file, including standard @@ hunk headers.>"
 }
 
 Rules:
 - Be specific — reference exact function names, line numbers, and variables when possible.
 - If the traceback points to a third-party library, explain what the application code did wrong to trigger it.
 - Keep the suggested fix actionable and short (ideally < 6 lines of code if a code change is needed).
+- In unified_diff, provide a valid unified diff with @@ hunk header targeting the affected file.
 """
 
 
@@ -111,18 +116,29 @@ def _parse_llm_response(raw_text: str) -> dict:
         text = text[4:].strip()
 
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        return {
+            "root_cause": parsed.get("root_cause", text),
+            "suggested_fix": parsed.get("suggested_fix", ""),
+            "unified_diff": parsed.get("unified_diff", ""),
+        }
     except json.JSONDecodeError:
         # Regex search for JSON object {...}
         match = re.search(r'\{[\s\S]*\}', text)
         if match:
             try:
-                return json.loads(match.group(0))
+                parsed = json.loads(match.group(0))
+                return {
+                    "root_cause": parsed.get("root_cause", text),
+                    "suggested_fix": parsed.get("suggested_fix", ""),
+                    "unified_diff": parsed.get("unified_diff", ""),
+                }
             except Exception:
                 pass
         return {
             "root_cause": raw_text.strip(),
             "suggested_fix": "",
+            "unified_diff": "",
         }
 
 
@@ -167,6 +183,197 @@ def _heuristic_triage(incident: "Incident") -> dict:
         }
 
 
+# ---------------------------------------------------------------------------
+# Auto-Remediation GitHub PR Webhook Dispatcher
+# ---------------------------------------------------------------------------
+
+def _parse_autotrace_dsn():
+    """Parse AUTOTRACE_DSN or fallback environment variables.
+
+    DSN Format: autotrace://[secret]@[domain]/[repo_owner]/[repo_name]
+    Returns: (webhook_url, secret, target_repo)
+    """
+    dsn = os.environ.get("AUTOTRACE_DSN", "").strip()
+    webhook_url = os.environ.get("AUTOTRACE_WEBHOOK_URL", "").strip()
+    secret = os.environ.get("AUTOTRACE_WEBHOOK_SECRET", "").strip()
+    target_repo = os.environ.get("AUTOTRACE_TARGET_REPO", "").strip()
+
+    if dsn:
+        try:
+            parsed = urllib.parse.urlparse(dsn)
+            netloc = parsed.netloc
+            if "@" in netloc:
+                secret_part, domain_part = netloc.rsplit("@", 1)
+                secret = urllib.parse.unquote(secret_part)
+                domain = domain_part
+            else:
+                domain = netloc
+
+            if domain:
+                scheme = "http" if domain.startswith("localhost") or domain.startswith("127.0.0.1") else "https"
+                webhook_url = f"{scheme}://{domain}/api/webhooks/github-pr"
+
+            repo_path = parsed.path.strip("/")
+            if repo_path and not target_repo:
+                target_repo = repo_path
+        except Exception as exc:
+            logger.warning("[AutoTrace] Failed to parse AUTOTRACE_DSN '%s': %s", dsn, exc)
+
+    # If AUTOTRACE_TARGET_REPO is explicitly set in env, it overrides or provides target_repo
+    env_target_repo = os.environ.get("AUTOTRACE_TARGET_REPO", "").strip()
+    if env_target_repo:
+        target_repo = env_target_repo
+    elif not target_repo:
+        target_repo = "rajjadhav55/autoTracer"
+
+    return webhook_url, secret, target_repo
+
+
+def _extract_affected_file(incident: "Incident", target_repo: str = "") -> tuple:
+    """Extract innermost application source file, line number, and code snippet from traceback.
+
+    Returns: (normalized_file_path, line_no, code_snippet)
+    """
+    tb = incident.traceback
+    frames = []
+    if isinstance(tb, list):
+        frames = tb
+    elif isinstance(tb, dict) and "frames" in tb:
+        frames = tb.get("frames", [])
+
+    ignored_keywords = [
+        "site-packages", "dist-packages", "lib/python", "python3",
+        "celery", "django", "<frozen", "<string>", "threading.py",
+        "wsgiref", "rest_framework", "socketserver",
+    ]
+
+    selected_frame = None
+    for frame in reversed(frames):
+        if not isinstance(frame, dict):
+            continue
+        file_path = frame.get("file") or frame.get("filename") or ""
+        norm_file = file_path.replace("\\", "/").lower()
+        if any(kw in norm_file for kw in ignored_keywords):
+            continue
+        selected_frame = frame
+        break
+
+    if not selected_frame and frames:
+        for f in reversed(frames):
+            if isinstance(f, dict) and (f.get("file") or f.get("filename")):
+                selected_frame = f
+                break
+
+    if not selected_frame:
+        return ("", 1, "")
+
+    raw_path = selected_frame.get("file") or selected_frame.get("filename") or ""
+    line_no = selected_frame.get("line") or selected_frame.get("lineno") or 1
+    code = selected_frame.get("code") or selected_frame.get("context_line") or ""
+
+    path = raw_path.replace("\\", "/")
+    if ":" in path or path.startswith("/"):
+        if target_repo and "filmingo-frontend" in target_repo:
+            if "/src/" in path:
+                path = path[path.index("/src/") + 1:]
+        for marker in ["/backend/", "/frontend/", "/sdk/", "/api/"]:
+            if marker in path:
+                path = path[path.index(marker) + 1:]
+                break
+        else:
+            if "/src/" in path:
+                path = path[path.index("/src/") + 1:]
+            else:
+                parts = path.split("/")
+                path = "/".join(parts[-3:]) if len(parts) >= 3 else parts[-1]
+
+    return (path, line_no, code)
+
+
+def _format_unified_diff(file_path: str, line_no: int, old_code: str, fix_code: str, raw_diff: str = "") -> str:
+    """Format unified diff with standard @@ hunk headers."""
+    if raw_diff and "@@" in raw_diff:
+        return raw_diff
+
+    line_no = max(1, int(line_no or 1))
+    old_lines = old_code.splitlines() if old_code else ["# problematic code line"]
+    fix_lines = fix_code.splitlines() if fix_code else ["# auto-remediation fix applied"]
+
+    diff_lines = [
+        f"--- a/{file_path}",
+        f"+++ b/{file_path}",
+        f"@@ -{line_no},{len(old_lines)} +{line_no},{len(fix_lines)} @@",
+    ]
+    for line in old_lines:
+        diff_lines.append(f"-{line}")
+    for line in fix_lines:
+        diff_lines.append(f"+{line}")
+    return "\n".join(diff_lines)
+
+
+def _dispatch_webhook_pr(incident: "Incident", unified_diff: str = "", file_path: str = ""):
+    """Fire-and-forget webhook dispatch to Vercel to open an automated GitHub PR."""
+    webhook_url, secret, target_repo = _parse_autotrace_dsn()
+
+    if not webhook_url or not secret:
+        logger.debug(
+            "[AutoTrace] Webhook PR skipped: AUTOTRACE_DSN or webhook credentials not configured."
+        )
+        return
+
+    extracted_file, line_no, old_code = _extract_affected_file(incident, target_repo)
+    final_file_path = file_path or extracted_file
+    if not final_file_path:
+        logger.warning(
+            "[AutoTrace] Webhook PR skipped: unable to determine affected file path for incident %s",
+            incident.id,
+        )
+        return
+
+    final_diff = _format_unified_diff(
+        final_file_path, line_no, old_code, incident.suggested_fix or "", unified_diff
+    )
+
+    payload = {
+        "incident_id": str(incident.id),
+        "error_type": incident.error_type,
+        "error_message": incident.error_message,
+        "file_path": final_file_path,
+        "unified_diff": final_diff,
+        "ai_root_cause_summary": incident.root_cause or "Automated triage detected exception.",
+        "target_repo": target_repo,
+        "stack_trace": _format_traceback(incident.traceback),
+        "reviewers": ["rajjadhav55"],
+    }
+
+    def _send():
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Webhook-Secret": secret,
+            }
+            resp = requests.post(webhook_url, json=payload, headers=headers, timeout=5)
+            if resp.status_code in (200, 201):
+                logger.info(
+                    "[AutoTrace] Auto-remediation PR webhook triggered successfully for incident %s: %s",
+                    incident.id, resp.json().get("pr_url", "OK"),
+                )
+            else:
+                logger.warning(
+                    "[AutoTrace] Webhook server responded %s: %s",
+                    resp.status_code, resp.text,
+                )
+        except Exception as exc:
+            logger.warning("[AutoTrace] Failed to send auto-remediation webhook to %s: %s", webhook_url, exc)
+
+    thread = threading.Thread(
+        target=_send,
+        daemon=True,
+        name=f"autotrace-webhook-{incident.id}",
+    )
+    thread.start()
+
+
 def run_ai_triage_sync(incident_id):
     """Perform AI-powered triage synchronously on an Incident.
 
@@ -175,6 +382,7 @@ def run_ai_triage_sync(incident_id):
     3. Call Google Gemini via LangChain for root-cause analysis (or heuristic fallback).
     4. Parse the LLM response and save root_cause + suggested_fix.
     5. Set status → TRIAGED and sync ErrorLog.
+    6. Dispatch auto-remediation webhook to Vercel to open GitHub PR.
     """
     try:
         incident = Incident.objects.get(id=incident_id)
@@ -237,6 +445,7 @@ def run_ai_triage_sync(incident_id):
         ErrorLog.objects.filter(id=incident.id).update(status="TRIAGED")
 
         logger.info("[AutoTrace] Finished triage for Incident %s in %ss using %s.", incident.id, ai_duration, model_name)
+        _dispatch_webhook_pr(incident, parsed.get("unified_diff", ""))
         return {"status": "success", "incident_id": str(incident.id), "duration_seconds": ai_duration}
 
     except Exception as exc:
@@ -255,6 +464,7 @@ def run_ai_triage_sync(incident_id):
         incident.status = "TRIAGED"
         incident.save(update_fields=["root_cause", "suggested_fix", "diagnostic_logs", "status"])
         ErrorLog.objects.filter(id=incident.id).update(status="TRIAGED")
+        _dispatch_webhook_pr(incident, fallback.get("unified_diff", ""))
         return {"status": "success", "incident_id": str(incident_id), "engine": "fallback"}
 
 
