@@ -21,23 +21,21 @@ logger = logging.getLogger(__name__)
 
 _GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
-_TRIAGE_SYSTEM_PROMPT = """\
-You are AutoTrace, an expert automated incident triage system.
-You will receive a crash report containing the exception type, error message,
-stack trace, HTTP endpoint, and request metadata.
+_TRIAGE_PROMPT_TEMPLATE = """You are an expert Python debugging assistant for an automated crash remediation pipeline. 
+Your job is to analyze the provided stack trace and generate a precise code patch.
 
-Analyse the crash and respond in **exactly** this JSON format (no markdown fences):
+CRITICAL INSTRUCTION: You MUST respond ONLY with a valid, parseable JSON object. 
+Do not include conversational text, do not add explanations outside the JSON, and do not use markdown formatting blocks like ```json.
+
+The JSON object must strictly follow this exact schema:
 {
-  "root_cause": "<A concise 2-4 sentence explanation of why this crash happened.>",
-  "suggested_fix": "<A concrete code-level fix or remediation step the developer should take.>",
-  "unified_diff": "<A unified git diff patch to fix the bug in the affected file, including standard @@ hunk headers.>"
+  "root_cause_explanation": "A concise 1-2 sentence explanation of why the crash occurred.",
+  "file_path": "The exact relative path to the file that needs fixing (e.g., 'ticket_booking/views.py'). Do not guess; extract this directly from the stack trace.",
+  "code_patch": "The exact corrected Python code snippet to replace the broken logic."
 }
 
-Rules:
-- Be specific — reference exact function names, line numbers, and variables when possible.
-- If the traceback points to a third-party library, explain what the application code did wrong to trigger it.
-- Keep the suggested fix actionable and short (ideally < 6 lines of code if a code change is needed).
-- In unified_diff, provide a valid unified diff with @@ hunk header targeting the affected file.
+Stack Trace to analyze:
+<INSERT_STACK_TRACE_HERE>
 """
 
 
@@ -61,47 +59,32 @@ def _format_traceback(tb):
 
 
 def _build_triage_prompt(incident: "Incident") -> str:
-    """Construct the user-facing prompt from incident data."""
-    sections = [
-        f"## Exception\n"
-        f"**Type:** {incident.error_type}\n"
-        f"**Message:** {incident.error_message}",
-    ]
-
-    if incident.runtime:
-        sections.append(f"**Runtime Environment:** {incident.runtime}")
-
-    if incident.project:
-        sections.append(f"**Project:** {incident.project.name}")
-
+    """Construct the final prompt by injecting actual stack trace into the template."""
     formatted_tb = _format_traceback(incident.traceback)
-    sections.append(f"## Stack Trace\n```\n{formatted_tb}\n```")
-
+    
+    sections = [
+        f"Exception Type: {incident.error_type}",
+        f"Exception Message: {incident.error_message}",
+    ]
+    if incident.runtime:
+        sections.append(f"Runtime: {incident.runtime}")
     if incident.endpoint:
-        sections.append(
-            f"## Request\n"
-            f"**Method:** {incident.http_method or 'N/A'}  \n"
-            f"**Endpoint:** {incident.endpoint}"
-        )
-
+        sections.append(f"Endpoint: {incident.http_method or 'GET'} {incident.endpoint}")
+    if formatted_tb:
+        sections.append(f"\nTraceback (most recent call last):\n{formatted_tb}")
     if incident.context_data:
-        sections.append(
-            f"## Context Data\n"
-            f"```json\n{json.dumps(incident.context_data, indent=2, default=str)}\n```"
-        )
-    elif incident.request_payload:
-        sections.append(
-            f"## Request Payload (sanitized)\n"
-            f"```json\n{json.dumps(incident.request_payload, indent=2, default=str)}\n```"
-        )
+        sections.append(f"\nContext Data:\n{json.dumps(incident.context_data, indent=2, default=str)}")
 
-    return "\n\n".join(sections)
+    actual_error_variable = "\n".join(sections)
+    return _TRIAGE_PROMPT_TEMPLATE.replace("<INSERT_STACK_TRACE_HERE>", str(actual_error_variable))
 
 
 def _parse_llm_response(raw_text: str) -> dict:
     """Best-effort extraction of JSON from the LLM response.
 
     Handles cases where the model wraps the JSON in markdown fences.
+    Supports both the precise schema (root_cause_explanation, file_path, code_patch)
+    and legacy fields.
     """
     import re
     text = raw_text.strip()
@@ -115,31 +98,39 @@ def _parse_llm_response(raw_text: str) -> dict:
     if text.startswith("json"):
         text = text[4:].strip()
 
+    parsed = {}
     try:
         parsed = json.loads(text)
-        return {
-            "root_cause": parsed.get("root_cause", text),
-            "suggested_fix": parsed.get("suggested_fix", ""),
-            "unified_diff": parsed.get("unified_diff", ""),
-        }
     except json.JSONDecodeError:
         # Regex search for JSON object {...}
         match = re.search(r'\{[\s\S]*\}', text)
         if match:
             try:
                 parsed = json.loads(match.group(0))
-                return {
-                    "root_cause": parsed.get("root_cause", text),
-                    "suggested_fix": parsed.get("suggested_fix", ""),
-                    "unified_diff": parsed.get("unified_diff", ""),
-                }
             except Exception:
-                pass
-        return {
-            "root_cause": raw_text.strip(),
-            "suggested_fix": "",
-            "unified_diff": "",
-        }
+                parsed = {}
+
+    root_cause = (
+        parsed.get("root_cause_explanation")
+        or parsed.get("root_cause")
+        or (raw_text.strip() if not parsed else "")
+    )
+    suggested_fix = (
+        parsed.get("code_patch")
+        or parsed.get("suggested_fix")
+        or ""
+    )
+    file_path = parsed.get("file_path", "")
+    unified_diff = parsed.get("unified_diff", "")
+
+    return {
+        "root_cause": root_cause,
+        "root_cause_explanation": root_cause,
+        "suggested_fix": suggested_fix,
+        "code_patch": suggested_fix,
+        "file_path": file_path,
+        "unified_diff": unified_diff,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -404,24 +395,18 @@ def run_ai_triage_sync(incident_id):
     try:
         if _GOOGLE_API_KEY and _GOOGLE_API_KEY != "your_google_gemini_api_key_here":
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3.6-flash",
+                model="gemini-2.5-flash",
                 google_api_key=_GOOGLE_API_KEY,
-                temperature=0.2,
+                temperature=0.1,
                 max_output_tokens=2048,
-                convert_system_message_to_human=True,
             )
 
-            user_prompt = _build_triage_prompt(incident)
-            messages = [
-                ("system", _TRIAGE_SYSTEM_PROMPT),
-                ("human", user_prompt),
-            ]
-
-            response = llm.invoke(messages)
+            final_prompt = _build_triage_prompt(incident)
+            response = llm.invoke(final_prompt)
             ai_duration = round(time.time() - start_time, 2)
             raw_text = response.content
             parsed = _parse_llm_response(raw_text)
-            model_name = "gemini-3.6-flash"
+            model_name = "gemini-2.5-flash"
         else:
             time.sleep(0.3)
             parsed = _heuristic_triage(incident)
@@ -445,7 +430,11 @@ def run_ai_triage_sync(incident_id):
         ErrorLog.objects.filter(id=incident.id).update(status="TRIAGED")
 
         logger.info("[AutoTrace] Finished triage for Incident %s in %ss using %s.", incident.id, ai_duration, model_name)
-        _dispatch_webhook_pr(incident, parsed.get("unified_diff", ""))
+        _dispatch_webhook_pr(
+            incident,
+            unified_diff=parsed.get("unified_diff", ""),
+            file_path=parsed.get("file_path", ""),
+        )
         return {"status": "success", "incident_id": str(incident.id), "duration_seconds": ai_duration}
 
     except Exception as exc:
