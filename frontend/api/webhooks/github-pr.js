@@ -162,8 +162,12 @@ export default async function handler(req, res) {
 
   // 1. Authenticate request
   const webhookSecret = process.env.AUTOTRACE_WEBHOOK_SECRET;
-  const incomingSecret = req.headers['x-webhook-secret'] || 
-    (req.headers['authorization'] && req.headers['authorization'].replace(/^Bearer\s+/i, ''));
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  const incomingSecret = 
+    req.headers['x-webhook-secret'] || 
+    req.headers['X-Webhook-Secret'] || 
+    req.headers['X-WEBHOOK-SECRET'] ||
+    (authHeader && authHeader.replace(/^Bearer\s+/i, ''));
 
   if (!webhookSecret || incomingSecret !== webhookSecret) {
     return res.status(401).json({ error: 'Unauthorized: invalid or missing webhook secret' });

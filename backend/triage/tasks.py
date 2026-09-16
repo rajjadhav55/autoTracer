@@ -342,6 +342,7 @@ def _dispatch_webhook_pr(incident: "Incident", unified_diff: str = "", file_path
             headers = {
                 "Content-Type": "application/json",
                 "X-Webhook-Secret": secret,
+                "Authorization": f"Bearer {secret}",
             }
             resp = requests.post(webhook_url, json=payload, headers=headers, timeout=5)
             if resp.status_code in (200, 201):
