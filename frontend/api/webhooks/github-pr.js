@@ -160,7 +160,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // 1. Authenticate request
+  // 1. Authenticate request with debug logging
   const webhookSecret = process.env.AUTOTRACE_WEBHOOK_SECRET;
   const authHeader = req.headers['authorization'] || req.headers['Authorization'];
   const incomingSecret = 
@@ -170,7 +170,14 @@ export default async function handler(req, res) {
     (authHeader && authHeader.replace(/^Bearer\s+/i, ''));
 
   if (!webhookSecret || incomingSecret !== webhookSecret) {
-    return res.status(401).json({ error: 'Unauthorized: invalid or missing webhook secret' });
+    console.warn(`[Auth Debug] Mismatch! Expected length: ${webhookSecret ? webhookSecret.length : 'NULL'}, Received length: ${incomingSecret ? incomingSecret.length : 'NULL'}`);
+    console.warn(`[Auth Debug] Expected (repr): ${JSON.stringify(webhookSecret)}`);
+    console.warn(`[Auth Debug] Received (repr): ${JSON.stringify(incomingSecret)}`);
+    return res.status(401).json({ 
+      error: 'Unauthorized: invalid or missing webhook secret',
+      debug_received: incomingSecret || null,
+      debug_expected_length: webhookSecret ? webhookSecret.length : 0
+    });
   }
 
   // 2. Validate payload
